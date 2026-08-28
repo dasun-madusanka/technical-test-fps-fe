@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { MultiplayerArena, MultiplayerState } from "@/game/MultiplayerArena";
 import { getGameSocket, disconnectGameSocket } from "@/lib/gameSocket";
@@ -22,7 +23,8 @@ const initialState: MultiplayerState = {
   won: false,
 };
 
-export default function QueuePage() {
+export default function MatchPage() {
+  const params = useParams<{ code: string }>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<MultiplayerArena | null>(null);
   const [state, setState] = useState<MultiplayerState>(initialState);
@@ -34,29 +36,43 @@ export default function QueuePage() {
     async function setup() {
       const res = await fetch("/api/game-token");
       if (!res.ok) {
-        setError("You need to log in to play multiplayer.");
+        setError("You need to log in to play.");
         return;
       }
       const { token, userId } = await res.json();
       if (cancelled || !canvasRef.current) return;
 
       const socket = getGameSocket(token);
-      const game = new MultiplayerArena(canvasRef.current, socket, setState); // omit params.code on /queue
+      const game = new MultiplayerArena(
+        canvasRef.current,
+        socket,
+        setState,
+        params.code,
+      ); // omit params.code on /queue
       game.setMyUserId(userId);
       gameRef.current = game;
     }
 
     setup();
-
     return () => {
       cancelled = true;
       gameRef.current?.dispose();
     };
-  }, []);
+  }, [params.code]);
+
+  // JSX identical to /queue/page.tsx's return block — copy that HUD/overlay structure here
+  // (health bar, ammo, scoreboard, kill feed, death overlay, match-over overlay, connecting overlay, error overlay)
 
   return (
-    <main className="relative overflow-hidden bg-black" style={{ width: "100vw", height: "100vh" }}>
-      <canvas ref={canvasRef} className="block" style={{ width: "100%", height: "100%" }} />
+    <main
+      className="relative overflow-hidden bg-black"
+      style={{ width: "100vw", height: "100vh" }}
+    >
+      <canvas
+        ref={canvasRef}
+        className="block"
+        style={{ width: "100%", height: "100%" }}
+      />
 
       {state.connectionStatus === "matched" && !state.matchOver && (
         <>
@@ -68,7 +84,10 @@ export default function QueuePage() {
                 <span>{state.myHealth}</span>
               </div>
               <div className="h-2 bg-slate-800 rounded overflow-hidden">
-                <div className="h-full bg-red-500 transition-all" style={{ width: `${state.myHealth}%` }} />
+                <div
+                  className="h-full bg-red-500 transition-all"
+                  style={{ width: `${state.myHealth}%` }}
+                />
               </div>
             </div>
             <div className="flex justify-between">
@@ -85,21 +104,29 @@ export default function QueuePage() {
               <span>{state.myKills}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-orange-400">{state.opponentUsername || "Opponent"}</span>
+              <span className="text-orange-400">
+                {state.opponentUsername || "Opponent"}
+              </span>
               <span>{state.opponentKills}</span>
             </div>
           </div>
 
           <div className="absolute top-4 left-4 z-10 font-mono text-xs text-slate-300 space-y-1">
             {state.killFeed.map((msg, i) => (
-              <div key={i} className="bg-black/40 px-2 py-1 rounded">{msg}</div>
+              <div key={i} className="bg-black/40 px-2 py-1 rounded">
+                {msg}
+              </div>
             ))}
           </div>
 
           {state.isDead && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60">
-              <div className="text-red-500 text-4xl font-bold mb-3">ELIMINATED</div>
-              <div className="text-slate-300 font-mono">Respawning in {state.respawnCountdown}...</div>
+              <div className="text-red-500 text-4xl font-bold mb-3">
+                ELIMINATED
+              </div>
+              <div className="text-slate-300 font-mono">
+                Respawning in {state.respawnCountdown}...
+              </div>
             </div>
           )}
         </>
@@ -107,33 +134,48 @@ export default function QueuePage() {
 
       {state.matchOver && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80">
-          <div className={`text-5xl font-bold mb-4 ${state.won ? "text-cyan-400" : "text-red-500"}`}>
+          <div
+            className={`text-5xl font-bold mb-4 ${state.won ? "text-cyan-400" : "text-red-500"}`}
+          >
             {state.won ? "VICTORY" : "DEFEAT"}
           </div>
           <div className="text-3xl font-mono text-slate-200 mb-6">
             {state.myKills} - {state.opponentKills}
           </div>
-          <Link href="/" className="px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition">
+          <Link
+            href="/"
+            className="px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition"
+          >
             RETURN HOME
           </Link>
         </div>
       )}
 
-      {(state.connectionStatus === "connecting" || state.connectionStatus === "queued") && !state.matchOver && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 text-center px-6">
-          <h1 className="text-2xl font-bold text-cyan-400 mb-3">
-            {state.connectionStatus === "connecting" ? "CONNECTING..." : "SEARCHING FOR OPPONENT..."}
-          </h1>
-          <p className="text-slate-500 font-mono text-sm">
-            This may take a moment if no one else is queued.
-          </p>
-        </div>
-      )}
+      {(state.connectionStatus === "connecting" ||
+        state.connectionStatus === "queued") &&
+        !state.matchOver && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 text-center px-6">
+            <h1 className="text-2xl font-bold text-cyan-400 mb-3">
+              {state.connectionStatus === "connecting"
+                ? "CONNECTING..."
+                : "Waiting for host to start..."}
+            </h1>
+            <p className="text-slate-500 font-mono text-sm">
+              This may take a moment if no one else is queued.
+            </p>
+          </div>
+        )}
 
-      {(error || state.connectionStatus === "error" || state.connectionStatus === "disconnected") && (
+      {(error ||
+        state.connectionStatus === "error" ||
+        state.connectionStatus === "disconnected") && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 text-center px-6">
-          <p className="text-red-400 font-mono mb-4">{error || "Connection to game server lost."}</p>
-          <Link href="/" className="text-cyan-400 hover:underline">← Back to home</Link>
+          <p className="text-red-400 font-mono mb-4">
+            {error || "Connection to game server lost."}
+          </p>
+          <Link href="/" className="text-cyan-400 hover:underline">
+            ← Back to home
+          </Link>
         </div>
       )}
     </main>

@@ -2,7 +2,12 @@ import * as THREE from "three";
 import { io, Socket } from "socket.io-client";
 
 export interface MultiplayerState {
-  connectionStatus: "connecting" | "queued" | "matched" | "disconnected" | "error";
+  connectionStatus:
+    | "connecting"
+    | "queued"
+    | "matched"
+    | "disconnected"
+    | "error";
   myHealth: number;
   myAmmo: number;
   isReloading: boolean;
@@ -20,7 +25,8 @@ export interface MultiplayerState {
 
 type StateListener = (state: MultiplayerState) => void;
 
-const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || "http://localhost:4000";
+const GAME_SERVER_URL =
+  process.env.NEXT_PUBLIC_GAME_SERVER_URL || "http://localhost:4000";
 const ARENA_HALF_SIZE = 15;
 const PLAYER_SPEED = 5.5;
 const PLAYER_HEIGHT = 1.6;
@@ -73,9 +79,10 @@ export class MultiplayerArena {
   private onState: StateListener;
   private myUserId: string | null = null;
 
-  constructor(canvas: HTMLCanvasElement, token: string, onState: StateListener) {
+  constructor(canvas: HTMLCanvasElement, socket: Socket, onState: StateListener, roomCode?: string) {
     this.canvas = canvas;
     this.onState = onState;
+    this.socket = socket;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
@@ -85,7 +92,12 @@ export class MultiplayerArena {
     this.scene.background = new THREE.Color(0x05060a);
     this.scene.fog = new THREE.Fog(0x05060a, 20, 55);
 
-    this.camera = new THREE.PerspectiveCamera(78, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+    this.camera = new THREE.PerspectiveCamera(
+      78,
+      canvas.clientWidth / canvas.clientHeight,
+      0.1,
+      1000,
+    );
     this.camera.position.set(0, PLAYER_HEIGHT, 10);
 
     this.buildArena();
@@ -97,22 +109,42 @@ export class MultiplayerArena {
     document.addEventListener("keydown", this.handleKeyDown);
     document.addEventListener("keyup", this.handleKeyUp);
 
-    this.socket = io(GAME_SERVER_URL, { auth: { token }, transports: ["websocket"] });
-    this.registerSocketHandlers();
+    // this.socket = io(GAME_SERVER_URL, { auth: { token }, transports: ["websocket"] });
+    // this.registerSocketHandlers();
+
+    // this.socket = io(GAME_SERVER_URL, { auth: { token }, transports: ["websocket"] });
+    this.registerSocketHandlers(roomCode);
   }
 
   setMyUserId(userId: string) {
     this.myUserId = userId;
   }
 
-  private registerSocketHandlers() {
-    this.socket.on("connect", () => {
+  private registerSocketHandlers(roomCode?: string) {
+    const startFlow = () => {
       this.updateState({ connectionStatus: "queued" });
-      this.socket.emit("queue:join");
-    });
+      if (roomCode) {
+        this.socket.emit("match:enter", { roomCode });
+      } else {
+        this.socket.emit("queue:join");
+      }
+    };
 
-    this.socket.on("connect_error", () => this.updateState({ connectionStatus: "error" }));
-    this.socket.on("queue:waiting", () => this.updateState({ connectionStatus: "queued" }));
+    if (this.socket.connected) {
+      startFlow();
+    } else {
+      this.socket.once("connect", startFlow);
+    }
+
+    this.socket.on("connect_error", () =>
+      this.updateState({ connectionStatus: "error" }),
+    );
+    this.socket.on("room:error", () =>
+      this.updateState({ connectionStatus: "error" }),
+    );
+    this.socket.on("queue:waiting", () =>
+      this.updateState({ connectionStatus: "queued" }),
+    );
 
     this.socket.on("match:found", () => {
       this.updateState({ connectionStatus: "matched" });
@@ -123,16 +155,29 @@ export class MultiplayerArena {
       "state:update",
       (data: {
         players: {
-          id: string; username: string; x: number; y: number; z: number; yaw: number;
-          health: number; ammo: number; kills: number; deaths: number; alive: boolean;
+          id: string;
+          username: string;
+          x: number;
+          y: number;
+          z: number;
+          yaw: number;
+          health: number;
+          ammo: number;
+          kills: number;
+          deaths: number;
+          alive: boolean;
         }[];
-      }) => this.applyStateUpdate(data.players)
+      }) => this.applyStateUpdate(data.players),
     );
 
-    this.socket.on("player:damaged", (data: { targetId: string; health: number }) => {
-      if (data.targetId === this.myUserId) this.updateState({ myHealth: data.health });
-      else this.updateState({ opponentHealth: data.health });
-    });
+    this.socket.on(
+      "player:damaged",
+      (data: { targetId: string; health: number }) => {
+        if (data.targetId === this.myUserId)
+          this.updateState({ myHealth: data.health });
+        else this.updateState({ opponentHealth: data.health });
+      },
+    );
 
     this.socket.on(
       "player:eliminated",
@@ -145,7 +190,7 @@ export class MultiplayerArena {
           this.pushKillFeed(`You eliminated ${this.state.opponentUsername}`);
           this.updateState({ opponentHealth: 0 });
         }
-      }
+      },
     );
 
     this.socket.on(
@@ -153,17 +198,29 @@ export class MultiplayerArena {
       (data: { userId: string; x: number; y: number; z: number }) => {
         if (data.userId === this.myUserId) {
           this.camera.position.set(data.x, data.y, data.z);
-          this.updateState({ isDead: false, myHealth: 100, myAmmo: MAGAZINE_SIZE });
+          this.updateState({
+            isDead: false,
+            myHealth: 100,
+            myAmmo: MAGAZINE_SIZE,
+          });
         } else if (this.opponentMesh) {
           this.opponentMesh.position.set(data.x, data.y, data.z);
           this.opponentTargetPos.set(data.x, data.y, data.z);
         }
-      }
+      },
     );
 
     this.socket.on(
       "match:end",
-      (data: { winnerId: string; results: { userId: string; kills: number; deaths: number; won: boolean }[] }) => {
+      (data: {
+        winnerId: string;
+        results: {
+          userId: string;
+          kills: number;
+          deaths: number;
+          won: boolean;
+        }[];
+      }) => {
         const me = data.results.find((r) => r.userId === this.myUserId);
         this.running = false;
         this.updateState({
@@ -172,27 +229,46 @@ export class MultiplayerArena {
           myKills: me?.kills ?? this.state.myKills,
           myDeaths: me?.deaths ?? this.state.myDeaths,
         });
-      }
+      },
     );
 
-    this.socket.on("disconnect", () => this.updateState({ connectionStatus: "disconnected" }));
+    this.socket.on("disconnect", () =>
+      this.updateState({ connectionStatus: "disconnected" }),
+    );
   }
 
   private applyStateUpdate(
     players: {
-      id: string; username: string; x: number; y: number; z: number; yaw: number;
-      health: number; ammo: number; kills: number; deaths: number; alive: boolean;
-    }[]
+      id: string;
+      username: string;
+      x: number;
+      y: number;
+      z: number;
+      yaw: number;
+      health: number;
+      ammo: number;
+      kills: number;
+      deaths: number;
+      alive: boolean;
+    }[],
   ) {
     for (const p of players) {
       if (p.id === this.myUserId) {
-        this.updateState({ myHealth: p.health, myAmmo: p.ammo, myKills: p.kills, myDeaths: p.deaths });
+        this.updateState({
+          myHealth: p.health,
+          myAmmo: p.ammo,
+          myKills: p.kills,
+          myDeaths: p.deaths,
+        });
         continue;
       }
       if (!this.opponentMesh) {
         this.opponentMesh = new THREE.Mesh(
           new THREE.CapsuleGeometry(0.5, 1.2, 4, 8),
-          new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0x7c2d12 })
+          new THREE.MeshStandardMaterial({
+            color: 0xf97316,
+            emissive: 0x7c2d12,
+          }),
         );
         this.scene.add(this.opponentMesh);
         this.updateState({ opponentUsername: p.username });
@@ -206,11 +282,13 @@ export class MultiplayerArena {
   private buildArena() {
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2, ARENA_HALF_SIZE * 2),
-      new THREE.MeshStandardMaterial({ color: 0x111827 })
+      new THREE.MeshStandardMaterial({ color: 0x111827 }),
     );
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
-    this.scene.add(new THREE.GridHelper(ARENA_HALF_SIZE * 2, 30, 0x22d3ee, 0x1e293b));
+    this.scene.add(
+      new THREE.GridHelper(ARENA_HALF_SIZE * 2, 30, 0x22d3ee, 0x1e293b),
+    );
 
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x0f172a });
     const wallHeight = 5;
@@ -222,13 +300,22 @@ export class MultiplayerArena {
       [ARENA_HALF_SIZE, wallHeight / 2, 0, wallThickness, ARENA_HALF_SIZE * 2],
     ];
     for (const [x, y, z, w, d] of positions) {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, wallHeight, d), wallMat);
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(w, wallHeight, d),
+        wallMat,
+      );
       wall.position.set(x, y, z);
       this.scene.add(wall);
     }
 
     const coverMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
-    const coverPositions: [number, number][] = [[4, 4], [-5, -3], [6, -6], [-6, 5], [0, -8]];
+    const coverPositions: [number, number][] = [
+      [4, 4],
+      [-5, -3],
+      [6, -6],
+      [-6, 5],
+      [0, -8],
+    ];
     for (const [x, z] of coverPositions) {
       const box = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2, 1.6), coverMat);
       box.position.set(x, 1, z);
@@ -248,7 +335,9 @@ export class MultiplayerArena {
     if (e.code === "KeyR") this.reload();
     if (e.code === "Space") this.jump();
   };
-  private handleKeyUp = (e: KeyboardEvent) => { this.keys[e.code] = false; };
+  private handleKeyUp = (e: KeyboardEvent) => {
+    this.keys[e.code] = false;
+  };
 
   private jump() {
     if (!this.isGrounded || this.state.isDead) return;
@@ -262,7 +351,9 @@ export class MultiplayerArena {
     this.yaw -= e.movementX * sensitivity;
     this.pitch -= e.movementY * sensitivity;
     this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
-    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, "YXZ"));
+    this.camera.quaternion.setFromEuler(
+      new THREE.Euler(this.pitch, this.yaw, 0, "YXZ"),
+    );
   };
 
   private handleMouseDown = () => {
@@ -284,14 +375,21 @@ export class MultiplayerArena {
     if (this.state.isDead || this.reloading || this.state.matchOver) return;
     const now = performance.now();
     if (now - this.lastShotTime < FIRE_INTERVAL_MS) return;
-    if (this.state.myAmmo <= 0) { this.reload(); return; }
+    if (this.state.myAmmo <= 0) {
+      this.reload();
+      return;
+    }
     this.lastShotTime = now;
 
     const direction = new THREE.Vector3();
     this.camera.getWorldDirection(direction);
 
     this.socket.emit("player:shoot", {
-      origin: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
+      origin: {
+        x: this.camera.position.x,
+        y: this.camera.position.y,
+        z: this.camera.position.z,
+      },
       direction: { x: direction.x, y: direction.y, z: direction.z },
     });
 
@@ -319,7 +417,9 @@ export class MultiplayerArena {
   }
 
   private pushKillFeed(message: string) {
-    this.updateState({ killFeed: [message, ...this.state.killFeed].slice(0, 4) });
+    this.updateState({
+      killFeed: [message, ...this.state.killFeed].slice(0, 4),
+    });
   }
 
   private updateState(partial: Partial<MultiplayerState>) {
@@ -329,8 +429,16 @@ export class MultiplayerArena {
 
   private updatePlayerMovement(delta: number) {
     if (this.state.isDead) return;
-    const forward = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).negate();
-    const right = new THREE.Vector3(Math.sin(this.yaw + Math.PI / 2), 0, Math.cos(this.yaw + Math.PI / 2)).negate();
+    const forward = new THREE.Vector3(
+      Math.sin(this.yaw),
+      0,
+      Math.cos(this.yaw),
+    ).negate();
+    const right = new THREE.Vector3(
+      Math.sin(this.yaw + Math.PI / 2),
+      0,
+      Math.cos(this.yaw + Math.PI / 2),
+    ).negate();
 
     this.velocity.set(0, 0, 0);
     if (this.keys["KeyW"]) this.velocity.add(forward);
@@ -371,7 +479,10 @@ export class MultiplayerArena {
 
   private interpolateOpponent(delta: number) {
     if (!this.opponentMesh) return;
-    this.opponentMesh.position.lerp(this.opponentTargetPos, Math.min(1, delta * 10));
+    this.opponentMesh.position.lerp(
+      this.opponentTargetPos,
+      Math.min(1, delta * 10),
+    );
   }
 
   start() {
@@ -399,8 +510,7 @@ export class MultiplayerArena {
     document.removeEventListener("mousemove", this.handleMouseMove);
     document.removeEventListener("keydown", this.handleKeyDown);
     document.removeEventListener("keyup", this.handleKeyUp);
-    this.socket.emit("queue:leave");
-    this.socket.disconnect();
+    this.socket.removeAllListeners(); // safe here since each match page owns a fresh listener set
     this.renderer.dispose();
   }
 }

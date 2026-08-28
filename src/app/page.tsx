@@ -1,4 +1,6 @@
 import Link from "next/link";
+import CreateRoomButton from "@/app/components/CreateRoomButton";
+import JoinRoomForm from "@/app/components/JoinRoomForm";
 import { getCurrentUser } from "@/lib/auth";
 
 export default async function Home() {
@@ -55,6 +57,7 @@ export default async function Home() {
           >
             1v1 (BETA)
           </Link>
+          <CreateRoomButton />
         </div>
 
         <div className="grid grid-cols-3 gap-4 text-sm text-slate-500 font-mono">
@@ -71,6 +74,8 @@ export default async function Home() {
             ARENA STYLE
           </div>
         </div>
+
+        <JoinRoomForm />
       </div>
     </main>
   );
