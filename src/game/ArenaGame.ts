@@ -27,6 +27,9 @@ const BOT_FIRE_INTERVAL_MS = 900;
 const BOT_HEALTH_MAX = 100;
 const PLAYER_HEALTH_MAX = 100;
 const RESPAWN_SECONDS = 3;
+const GRAVITY = -18;
+const JUMP_SPEED = 6.5;
+const GROUND_Y = PLAYER_HEIGHT;
 
 export class ArenaGame {
   private renderer: THREE.WebGLRenderer;
@@ -45,6 +48,8 @@ export class ArenaGame {
   private keys: Record<string, boolean> = {};
   private lastShotTime = 0;
   private reloading = false;
+  private verticalVelocity = 0;
+  private isGrounded = true;
 
   // bot
   private botMesh: THREE.Mesh;
@@ -86,7 +91,7 @@ export class ArenaGame {
       78,
       canvas.clientWidth / canvas.clientHeight,
       0.1,
-      1000
+      1000,
     );
     this.resetPlayerPosition();
 
@@ -107,19 +112,21 @@ export class ArenaGame {
     this.camera.position.set(0, PLAYER_HEIGHT, 10);
     this.yaw = Math.PI;
     this.pitch = 0;
+    this.verticalVelocity = 0;
+    this.isGrounded = true;
     this.camera.quaternion.setFromEuler(new THREE.Euler(0, this.yaw, 0, "YXZ"));
   }
 
   private buildArena() {
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2, ARENA_HALF_SIZE * 2),
-      new THREE.MeshStandardMaterial({ color: 0x111827 })
+      new THREE.MeshStandardMaterial({ color: 0x111827 }),
     );
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
 
     this.scene.add(
-      new THREE.GridHelper(ARENA_HALF_SIZE * 2, 30, 0x22d3ee, 0x1e293b)
+      new THREE.GridHelper(ARENA_HALF_SIZE * 2, 30, 0x22d3ee, 0x1e293b),
     );
 
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x0f172a });
@@ -135,7 +142,7 @@ export class ArenaGame {
     for (const [x, y, z, w, d] of positions) {
       const wall = new THREE.Mesh(
         new THREE.BoxGeometry(w, wallHeight, d),
-        wallMat
+        wallMat,
       );
       wall.position.set(x, y, z);
       this.scene.add(wall);
@@ -168,7 +175,7 @@ export class ArenaGame {
   private spawnBot(): THREE.Mesh {
     const bot = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.5, 1.2, 4, 8),
-      new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0x7c2d12 })
+      new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0x7c2d12 }),
     );
     bot.position.set(0, 1.1, -10);
     this.scene.add(bot);
@@ -183,10 +190,18 @@ export class ArenaGame {
   private handleKeyDown = (e: KeyboardEvent) => {
     this.keys[e.code] = true;
     if (e.code === "KeyR") this.reload();
+    if (e.code === "Space") this.jump();
   };
+
   private handleKeyUp = (e: KeyboardEvent) => {
     this.keys[e.code] = false;
   };
+
+  private jump() {
+    if (!this.isGrounded || this.state.isPlayerDead) return;
+    this.verticalVelocity = JUMP_SPEED;
+    this.isGrounded = false;
+  }
 
   private handleMouseMove = (e: MouseEvent) => {
     if (document.pointerLockElement !== this.canvas) return;
@@ -195,7 +210,7 @@ export class ArenaGame {
     this.pitch -= e.movementY * sensitivity;
     this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
     this.camera.quaternion.setFromEuler(
-      new THREE.Euler(this.pitch, this.yaw, 0, "YXZ")
+      new THREE.Euler(this.pitch, this.yaw, 0, "YXZ"),
     );
   };
 
@@ -229,7 +244,9 @@ export class ArenaGame {
     this.state.playerAmmo -= 1;
 
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
-    const targets = this.botAlive ? [this.botMesh, ...this.obstacles] : this.obstacles;
+    const targets = this.botAlive
+      ? [this.botMesh, ...this.obstacles]
+      : this.obstacles;
     const hits = this.raycaster.intersectObjects(targets, false);
 
     if (hits.length > 0 && hits[0].object === this.botMesh) {
@@ -319,12 +336,12 @@ export class ArenaGame {
     const forward = new THREE.Vector3(
       Math.sin(this.yaw),
       0,
-      Math.cos(this.yaw)
+      Math.cos(this.yaw),
     ).negate();
     const right = new THREE.Vector3(
       Math.sin(this.yaw + Math.PI / 2),
       0,
-      Math.cos(this.yaw + Math.PI / 2)
+      Math.cos(this.yaw + Math.PI / 2),
     ).negate();
 
     this.velocity.set(0, 0, 0);
@@ -342,6 +359,16 @@ export class ArenaGame {
       this.camera.position.x = next.x;
       this.camera.position.z = next.z;
     }
+
+    // vertical movement (jump/gravity)
+    this.verticalVelocity += GRAVITY * delta;
+    this.camera.position.y += this.verticalVelocity * delta;
+
+    if (this.camera.position.y <= GROUND_Y) {
+      this.camera.position.y = GROUND_Y;
+      this.verticalVelocity = 0;
+      this.isGrounded = true;
+    }
   }
 
   // ---------- bot AI ----------
@@ -357,7 +384,7 @@ export class ArenaGame {
       this.botTarget.set(
         Math.cos(angle) * radius,
         1.1,
-        Math.sin(angle) * radius
+        Math.sin(angle) * radius,
       );
     }
 
@@ -367,17 +394,38 @@ export class ArenaGame {
       toTarget.normalize().multiplyScalar(2.2 * delta);
       this.botMesh.position.add(toTarget);
     }
-    this.botMesh.lookAt(this.camera.position.x, this.botMesh.position.y, this.camera.position.z);
+    this.botMesh.lookAt(
+      this.camera.position.x,
+      this.botMesh.position.y,
+      this.camera.position.z,
+    );
 
     const now = performance.now();
     if (now - this.botLastShotTime > BOT_FIRE_INTERVAL_MS) {
       this.botLastShotTime = now;
-      const distance = this.botMesh.position.distanceTo(this.camera.position);
-      const hitChance = Math.max(0.15, 0.75 - distance * 0.03);
-      if (Math.random() < hitChance) {
-        this.damagePlayer(BOT_DAMAGE);
+
+      if (this.hasLineOfSightToPlayer()) {
+        const distance = this.botMesh.position.distanceTo(this.camera.position);
+        const hitChance = Math.max(0.15, 0.75 - distance * 0.03);
+        if (Math.random() < hitChance) {
+          this.damagePlayer(BOT_DAMAGE);
+        }
       }
     }
+  }
+
+  private hasLineOfSightToPlayer(): boolean {
+    const origin = this.botMesh.position.clone();
+    origin.y = 1.1;
+    const target = this.camera.position.clone();
+    const direction = target.clone().sub(origin);
+    const distance = direction.length();
+    direction.normalize();
+
+    this.raycaster.set(origin, direction);
+    this.raycaster.far = distance;
+    const blocked = this.raycaster.intersectObjects(this.obstacles, false);
+    return blocked.length === 0;
   }
 
   // ---------- loop ----------
