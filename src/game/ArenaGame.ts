@@ -11,6 +11,8 @@ export interface ArenaState {
   isPlayerDead: boolean;
   respawnCountdown: number;
   killFeed: string[];
+  matchOver: boolean;
+  playerWon: boolean;
 }
 
 type StateListener = (state: ArenaState) => void;
@@ -30,6 +32,7 @@ const RESPAWN_SECONDS = 3;
 const GRAVITY = -18;
 const JUMP_SPEED = 6.5;
 const GROUND_Y = PLAYER_HEIGHT;
+const SCORE_LIMIT = 10;
 
 export class ArenaGame {
   private renderer: THREE.WebGLRenderer;
@@ -72,6 +75,8 @@ export class ArenaGame {
     isPlayerDead: false,
     respawnCountdown: 0,
     killFeed: [],
+    matchOver: false,
+    playerWon: false,
   };
   private onState: StateListener;
 
@@ -270,13 +275,18 @@ export class ArenaGame {
   }
 
   private damageBot(amount: number) {
-    if (!this.botAlive) return;
+    if (!this.botAlive || this.state.matchOver) return;
     this.botHealth -= amount;
     if (this.botHealth <= 0) {
       this.botAlive = false;
       this.scene.remove(this.botMesh);
       this.state.playerKills += 1;
       this.pushKillFeed("You eliminated the bot");
+
+      if (this.state.playerKills >= SCORE_LIMIT) {
+        this.endMatch(true);
+        return;
+      }
       setTimeout(() => this.respawnBot(), 2000);
     }
   }
@@ -286,7 +296,7 @@ export class ArenaGame {
   }
 
   private damagePlayer(amount: number) {
-    if (this.state.isPlayerDead) return;
+    if (this.state.isPlayerDead || this.state.matchOver) return;
     this.state.playerHealth -= amount;
     if (this.state.playerHealth <= 0) {
       this.state.playerHealth = 0;
@@ -294,8 +304,20 @@ export class ArenaGame {
       this.state.playerDeaths += 1;
       this.state.botKills += 1;
       this.pushKillFeed("The bot eliminated you");
+
+      if (this.state.botKills >= SCORE_LIMIT) {
+        this.endMatch(false);
+        return;
+      }
       this.beginRespawnCountdown();
     }
+    this.emitState();
+  }
+
+  private endMatch(playerWon: boolean) {
+    this.state.matchOver = true;
+    this.state.playerWon = playerWon;
+    this.running = false;
     this.emitState();
   }
 
