@@ -38,8 +38,15 @@ export default function PracticePage() {
   };
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-black">
-      <canvas ref={canvasRef} className="w-full h-full block" />
+    <main
+      className="relative overflow-hidden bg-black"
+      style={{ width: "100vw", height: "100vh" }}
+    >
+      <canvas
+        ref={canvasRef}
+        className="block"
+        style={{ width: "100%", height: "100%" }}
+      />
 
       {started && <StatsHUD stats={stats} />}
       {started && <div className="crosshair" />}
@@ -59,7 +66,10 @@ export default function PracticePage() {
           >
             START
           </button>
-          <Link href="/" className="text-slate-500 text-sm hover:text-slate-300">
+          <Link
+            href="/"
+            className="text-slate-500 text-sm hover:text-slate-300"
+          >
             ← Back to home
           </Link>
         </div>

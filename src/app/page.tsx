@@ -21,13 +21,12 @@ export default function Home() {
           >
             PRACTICE
           </Link>
-          <button
-            disabled
-            className="px-8 py-3 rounded-lg bg-slate-800 text-slate-500 font-bold cursor-not-allowed"
-            title="Coming in the next phase"
+          <Link
+            href="/arena"
+            className="px-8 py-3 rounded-lg bg-orange-500 hover:bg-orange-400 text-slate-950 font-bold transition"
           >
             PLAY NOW
-          </button>
+          </Link>
           <button
             disabled
             className="px-8 py-3 rounded-lg bg-slate-800 text-slate-500 font-bold cursor-not-allowed"
