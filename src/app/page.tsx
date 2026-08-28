@@ -20,7 +20,8 @@ export default async function Home() {
         <p className="text-slate-500 text-sm mb-8 font-mono">
           {user ? (
             <>
-              Signed in as <span className="text-cyan-400">{user.username}</span>
+              Signed in as{" "}
+              <span className="text-cyan-400">{user.username}</span>
             </>
           ) : (
             <Link href="/login" className="text-cyan-400 hover:underline">
@@ -47,6 +48,12 @@ export default async function Home() {
             className="px-8 py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition"
           >
             LEADERBOARD
+          </Link>
+          <Link
+            href="/queue"
+            className="px-8 py-3 rounded-lg bg-red-500 hover:bg-red-400 text-slate-950 font-bold transition"
+          >
+            1v1 (BETA)
           </Link>
         </div>
 
