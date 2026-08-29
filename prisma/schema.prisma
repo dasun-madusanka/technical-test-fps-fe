@@ -23,6 +23,8 @@ model User {
   rating Int @default(1000)
 
   weaponStats PlayerWeaponStat[]
+
+  settings UserSettings?
 }
 
 model Weapon {
@@ -60,4 +62,18 @@ model PlayerWeaponStat {
   selectedVariantId String?
 
   @@unique([userId, weaponId])
+}
+
+model UserSettings {
+  id             String @id @default(cuid())
+  userId         String @unique
+  user           User   @relation(fields: [userId], references: [id])
+  mouseSens      Float  @default(0.7)
+  aimSens        Float  @default(0.65)
+  keyForward     String @default("KeyW")
+  keyBackward    String @default("KeyS")
+  keyLeft        String @default("KeyA")
+  keyRight       String @default("KeyD")
+  keyJump        String @default("Space")
+  keyReload      String @default("KeyR")
 }

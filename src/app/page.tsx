@@ -64,6 +64,12 @@ export default async function Home() {
           >
             LOADOUT
           </Link>
+          <Link
+            href="/settings"
+            className="px-8 py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition"
+          >
+            SETTINGS
+          </Link>
         </div>
 
         <div className="grid grid-cols-3 gap-4 text-sm text-slate-500 font-mono">

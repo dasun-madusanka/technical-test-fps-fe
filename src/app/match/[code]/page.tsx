@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { MultiplayerArena, MultiplayerState } from "@/game/MultiplayerArena";
+import { GameSettings, WeaponConfig } from "@/game/ArenaGame";
 import { getGameSocket, disconnectGameSocket } from "@/lib/gameSocket";
 
 const initialState: MultiplayerState = {
@@ -25,14 +26,62 @@ const initialState: MultiplayerState = {
 
 export default function MatchPage() {
   const params = useParams<{ code: string }>();
+  const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<MultiplayerArena | null>(null);
   const [state, setState] = useState<MultiplayerState>(initialState);
   const [error, setError] = useState("");
-  const [reportStatus, setReportStatus] = useState<
-    "idle" | "saving" | "saved" | "error"
-  >("idle");
+  const [weapon, setWeapon] = useState<WeaponConfig | null>(null);
+  const [settings, setSettings] = useState<GameSettings | null>(null);
+  const [reportStatus, setReportStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const hasReported = useRef(false);
+
+  useEffect(() => {
+    fetch("/api/loadout/equipped")
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setWeapon)
+      .catch(() => setWeapon(null));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((res) => res.json())
+      .then(setSettings)
+      .catch(() => setSettings(null));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function setup() {
+      const res = await fetch("/api/game-token");
+      if (!res.ok) {
+        setError("You need to log in to play.");
+        return;
+      }
+      const { token, userId } = await res.json();
+      if (cancelled || !canvasRef.current || !weapon || !settings) return;
+
+      const socket = getGameSocket(token);
+      const game = new MultiplayerArena(
+        canvasRef.current,
+        socket,
+        setState,
+        params.code,
+        weapon,
+        settings
+      );
+      game.setMyUserId(userId);
+      gameRef.current = game;
+    }
+
+    setup();
+
+    return () => {
+      cancelled = true;
+      gameRef.current?.dispose();
+    };
+  }, [params.code, weapon, settings]);
 
   useEffect(() => {
     if (state.matchOver && !hasReported.current) {
@@ -46,7 +95,7 @@ export default function MatchPage() {
           won: state.won,
           kills: state.myKills,
           deaths: state.myDeaths,
-          weaponKey: "rifle",
+          weaponKey: weapon?.key ?? "rifle",
         }),
       })
         .then((res) => {
@@ -55,51 +104,11 @@ export default function MatchPage() {
         })
         .catch(() => setReportStatus("error"));
     }
-  }, [state.matchOver, state.won, state.myKills, state.myDeaths]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function setup() {
-      const res = await fetch("/api/game-token");
-      if (!res.ok) {
-        setError("You need to log in to play.");
-        return;
-      }
-      const { token, userId } = await res.json();
-      if (cancelled || !canvasRef.current) return;
-
-      const socket = getGameSocket(token);
-      const game = new MultiplayerArena(
-        canvasRef.current,
-        socket,
-        setState,
-        params.code,
-      ); // omit params.code on /queue
-      game.setMyUserId(userId);
-      gameRef.current = game;
-    }
-
-    setup();
-    return () => {
-      cancelled = true;
-      gameRef.current?.dispose();
-    };
-  }, [params.code]);
-
-  // JSX identical to /queue/page.tsx's return block — copy that HUD/overlay structure here
-  // (health bar, ammo, scoreboard, kill feed, death overlay, match-over overlay, connecting overlay, error overlay)
+  }, [state.matchOver, state.won, state.myKills, state.myDeaths, weapon]);
 
   return (
-    <main
-      className="relative overflow-hidden bg-black"
-      style={{ width: "100vw", height: "100vh" }}
-    >
-      <canvas
-        ref={canvasRef}
-        className="block"
-        style={{ width: "100%", height: "100%" }}
-      />
+    <main className="relative overflow-hidden bg-black" style={{ width: "100vw", height: "100vh" }}>
+      <canvas ref={canvasRef} className="block" style={{ width: "100%", height: "100%" }} />
 
       {state.connectionStatus === "matched" && !state.matchOver && (
         <>
@@ -120,7 +129,7 @@ export default function MatchPage() {
             <div className="flex justify-between">
               <span className="text-slate-400">AMMO</span>
               <span className={state.isReloading ? "text-yellow-400" : ""}>
-                {state.isReloading ? "RELOADING..." : `${state.myAmmo} / 30`}
+                {state.isReloading ? "RELOADING..." : `${state.myAmmo} / ${weapon?.magazineSize ?? 30}`}
               </span>
             </div>
           </div>
@@ -131,9 +140,7 @@ export default function MatchPage() {
               <span>{state.myKills}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-orange-400">
-                {state.opponentUsername || "Opponent"}
-              </span>
+              <span className="text-orange-400">{state.opponentUsername || "Opponent"}</span>
               <span>{state.opponentKills}</span>
             </div>
           </div>
@@ -148,9 +155,7 @@ export default function MatchPage() {
 
           {state.isDead && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60">
-              <div className="text-red-500 text-4xl font-bold mb-3">
-                ELIMINATED
-              </div>
+              <div className="text-red-500 text-4xl font-bold mb-3">ELIMINATED</div>
               <div className="text-slate-300 font-mono">
                 Respawning in {state.respawnCountdown}...
               </div>
@@ -161,9 +166,7 @@ export default function MatchPage() {
 
       {state.matchOver && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80">
-          <div
-            className={`text-5xl font-bold mb-4 ${state.won ? "text-cyan-400" : "text-red-500"}`}
-          >
+          <div className={`text-5xl font-bold mb-4 ${state.won ? "text-cyan-400" : "text-red-500"}`}>
             {state.won ? "VICTORY" : "DEFEAT"}
           </div>
           <div className="text-3xl font-mono text-slate-200 mb-6">
@@ -173,41 +176,36 @@ export default function MatchPage() {
           <div className="text-slate-500 font-mono text-sm mb-6">
             {reportStatus === "saving" && "Saving match result..."}
             {reportStatus === "saved" && "Stats updated."}
-            {reportStatus === "error" &&
-              "Could not save stats (are you logged in?)"}
+            {reportStatus === "error" && "Could not save stats (are you logged in?)"}
           </div>
 
-          <Link
-            href="/"
+          <button
+            onClick={() => {
+              disconnectGameSocket();
+              router.push("/");
+            }}
             className="px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition"
           >
             RETURN HOME
-          </Link>
+          </button>
         </div>
       )}
 
-      {(state.connectionStatus === "connecting" ||
-        state.connectionStatus === "queued") &&
+      {(state.connectionStatus === "connecting" || state.connectionStatus === "queued") &&
         !state.matchOver && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 text-center px-6">
             <h1 className="text-2xl font-bold text-cyan-400 mb-3">
-              {state.connectionStatus === "connecting"
-                ? "CONNECTING..."
-                : "Waiting for host to start..."}
+              {state.connectionStatus === "connecting" ? "CONNECTING..." : "WAITING FOR HOST TO START..."}
             </h1>
             <p className="text-slate-500 font-mono text-sm">
-              This may take a moment if no one else is queued.
+              The match will begin once the host clicks Start.
             </p>
           </div>
         )}
 
-      {(error ||
-        state.connectionStatus === "error" ||
-        state.connectionStatus === "disconnected") && (
+      {(error || state.connectionStatus === "error" || state.connectionStatus === "disconnected") && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 text-center px-6">
-          <p className="text-red-400 font-mono mb-4">
-            {error || "Connection to game server lost."}
-          </p>
+          <p className="text-red-400 font-mono mb-4">{error || "Connection to game server lost."}</p>
           <Link href="/" className="text-cyan-400 hover:underline">
             ← Back to home
           </Link>

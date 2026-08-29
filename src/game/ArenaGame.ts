@@ -15,6 +15,26 @@ export interface ArenaState {
   playerWon: boolean;
 }
 
+export interface GameSettings {
+  mouseSens: number;
+  keyForward: string;
+  keyBackward: string;
+  keyLeft: string;
+  keyRight: string;
+  keyJump: string;
+  keyReload: string;
+}
+
+const DEFAULT_SETTINGS: GameSettings = {
+  mouseSens: 0.7,
+  keyForward: "KeyW",
+  keyBackward: "KeyS",
+  keyLeft: "KeyA",
+  keyRight: "KeyD",
+  keyJump: "Space",
+  keyReload: "KeyR",
+};
+
 type StateListener = (state: ArenaState) => void;
 
 const ARENA_HALF_SIZE = 15;
@@ -78,16 +98,20 @@ export class ArenaGame {
   private obstacles: THREE.Mesh[] = [];
   private state: ArenaState;
 
+  private settings: GameSettings;
+
   private onState: StateListener;
 
   constructor(
     canvas: HTMLCanvasElement,
     onState: StateListener,
     weapon: WeaponConfig = DEFAULT_WEAPON,
+    settings: GameSettings = DEFAULT_SETTINGS,
   ) {
     this.canvas = canvas;
     this.onState = onState;
     this.weapon = weapon;
+    this.settings = settings;
 
     this.state = {
       playerHealth: PLAYER_HEALTH_MAX,
@@ -214,10 +238,9 @@ export class ArenaGame {
 
   private handleKeyDown = (e: KeyboardEvent) => {
     this.keys[e.code] = true;
-    if (e.code === "KeyR") this.reload();
-    if (e.code === "Space") this.jump();
+    if (e.code === this.settings.keyReload) this.reload();
+    if (e.code === this.settings.keyJump) this.jump();
   };
-
   private handleKeyUp = (e: KeyboardEvent) => {
     this.keys[e.code] = false;
   };
@@ -230,7 +253,7 @@ export class ArenaGame {
 
   private handleMouseMove = (e: MouseEvent) => {
     if (document.pointerLockElement !== this.canvas) return;
-    const sensitivity = 0.0022;
+    const sensitivity = 0.0022 * (this.settings.mouseSens / 0.7); // 0.7 is our baseline "1x"
     this.yaw -= e.movementX * sensitivity;
     this.pitch -= e.movementY * sensitivity;
     this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
@@ -389,10 +412,10 @@ export class ArenaGame {
     ).negate();
 
     this.velocity.set(0, 0, 0);
-    if (this.keys["KeyW"]) this.velocity.add(forward);
-    if (this.keys["KeyS"]) this.velocity.sub(forward);
-    if (this.keys["KeyD"]) this.velocity.add(right);
-    if (this.keys["KeyA"]) this.velocity.sub(right);
+    if (this.keys[this.settings.keyForward]) this.velocity.add(forward);
+    if (this.keys[this.settings.keyBackward]) this.velocity.sub(forward);
+    if (this.keys[this.settings.keyRight]) this.velocity.add(right);
+    if (this.keys[this.settings.keyLeft]) this.velocity.sub(right);
 
     if (this.velocity.lengthSq() > 0) {
       this.velocity.normalize().multiplyScalar(PLAYER_SPEED * delta);

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { io, Socket } from "socket.io-client";
-import { WeaponConfig } from "./ArenaGame";
+import { WeaponConfig, GameSettings } from "./ArenaGame";
 
 export interface MultiplayerState {
   connectionStatus:
@@ -37,6 +37,16 @@ const MAGAZINE_SIZE = 30;
 const RELOAD_TIME_MS = 1500;
 const FIRE_INTERVAL_MS = 180;
 const MOVE_SEND_INTERVAL_MS = 50;
+
+const DEFAULT_SETTINGS: GameSettings = {
+  mouseSens: 0.7,
+  keyForward: "KeyW",
+  keyBackward: "KeyS",
+  keyLeft: "KeyA",
+  keyRight: "KeyD",
+  keyJump: "Space",
+  keyReload: "KeyR",
+};
 
 export class MultiplayerArena {
   private renderer: THREE.WebGLRenderer;
@@ -80,6 +90,7 @@ export class MultiplayerArena {
   private onState: StateListener;
   private myUserId: string | null = null;
   private weapon?: WeaponConfig;
+  private settings: GameSettings;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -87,10 +98,12 @@ export class MultiplayerArena {
     onState: StateListener,
     roomCode?: string,
     weapon?: WeaponConfig,
+    settings: GameSettings = DEFAULT_SETTINGS,
   ) {
     this.canvas = canvas;
     this.onState = onState;
     this.socket = socket;
+    this.settings = settings;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
@@ -130,14 +143,18 @@ export class MultiplayerArena {
   }
 
   private registerSocketHandlers(roomCode?: string) {
-        const startFlow = () => {
+    const startFlow = () => {
       this.updateState({ connectionStatus: "queued" });
       const weaponPayload = this.weapon
-        ? { damage: this.weapon.damage, fireRate: this.weapon.fireRate, magazineSize: this.weapon.magazineSize }
+        ? {
+            damage: this.weapon.damage,
+            fireRate: this.weapon.fireRate,
+            magazineSize: this.weapon.magazineSize,
+          }
         : undefined;
 
       if (roomCode) {
-        this.socket.emit("match:enter", { roomCode }); 
+        this.socket.emit("match:enter", { roomCode });
       } else {
         this.socket.emit("queue:join", { weapon: weaponPayload });
       }
@@ -345,8 +362,8 @@ export class MultiplayerArena {
 
   private handleKeyDown = (e: KeyboardEvent) => {
     this.keys[e.code] = true;
-    if (e.code === "KeyR") this.reload();
-    if (e.code === "Space") this.jump();
+    if (e.code === this.settings.keyReload) this.reload();
+    if (e.code === this.settings.keyJump) this.jump();
   };
   private handleKeyUp = (e: KeyboardEvent) => {
     this.keys[e.code] = false;
@@ -360,7 +377,7 @@ export class MultiplayerArena {
 
   private handleMouseMove = (e: MouseEvent) => {
     if (document.pointerLockElement !== this.canvas) return;
-    const sensitivity = 0.0022;
+    const sensitivity = 0.0022 * (this.settings.mouseSens / 0.7); // 0.7 is our baseline "1x"
     this.yaw -= e.movementX * sensitivity;
     this.pitch -= e.movementY * sensitivity;
     this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
@@ -454,10 +471,10 @@ export class MultiplayerArena {
     ).negate();
 
     this.velocity.set(0, 0, 0);
-    if (this.keys["KeyW"]) this.velocity.add(forward);
-    if (this.keys["KeyS"]) this.velocity.sub(forward);
-    if (this.keys["KeyD"]) this.velocity.add(right);
-    if (this.keys["KeyA"]) this.velocity.sub(right);
+    if (this.keys[this.settings.keyForward]) this.velocity.add(forward);
+    if (this.keys[this.settings.keyBackward]) this.velocity.sub(forward);
+    if (this.keys[this.settings.keyRight]) this.velocity.add(right);
+    if (this.keys[this.settings.keyLeft]) this.velocity.sub(right);
 
     if (this.velocity.lengthSq() > 0) {
       this.velocity.normalize().multiplyScalar(PLAYER_SPEED * delta);
