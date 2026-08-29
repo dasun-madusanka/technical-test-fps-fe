@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
 
-  const { won, kills, deaths } = await req.json();
+  const { won, kills, deaths, headshots = 0, weaponKey } = await req.json();
 
   if (typeof won !== "boolean" || typeof kills !== "number" || typeof deaths !== "number") {
     return NextResponse.json({ error: "Invalid match report." }, { status: 400 });
@@ -33,6 +33,25 @@ export async function POST(req: NextRequest) {
       xp: { increment: xpGained },
     },
   });
+
+  if (weaponKey) {
+    const weapon = await prisma.weapon.findUnique({ where: { key: weaponKey } });
+    if (weapon) {
+      await prisma.playerWeaponStat.upsert({
+        where: { userId_weaponId: { userId: user.id, weaponId: weapon.id } },
+        update: {
+          kills: { increment: kills },
+          headshots: { increment: headshots },
+        },
+        create: {
+          userId: user.id,
+          weaponId: weapon.id,
+          kills,
+          headshots,
+        },
+      });
+    }
+  }
 
   return NextResponse.json({
     rating: updated.rating,

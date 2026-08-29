@@ -29,6 +29,33 @@ export default function MatchPage() {
   const gameRef = useRef<MultiplayerArena | null>(null);
   const [state, setState] = useState<MultiplayerState>(initialState);
   const [error, setError] = useState("");
+  const [reportStatus, setReportStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const hasReported = useRef(false);
+
+  useEffect(() => {
+    if (state.matchOver && !hasReported.current) {
+      hasReported.current = true;
+      setReportStatus("saving");
+
+      fetch("/api/matches/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          won: state.won,
+          kills: state.myKills,
+          deaths: state.myDeaths,
+          weaponKey: "rifle",
+        }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("failed");
+          setReportStatus("saved");
+        })
+        .catch(() => setReportStatus("error"));
+    }
+  }, [state.matchOver, state.won, state.myKills, state.myDeaths]);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,6 +169,14 @@ export default function MatchPage() {
           <div className="text-3xl font-mono text-slate-200 mb-6">
             {state.myKills} - {state.opponentKills}
           </div>
+
+          <div className="text-slate-500 font-mono text-sm mb-6">
+            {reportStatus === "saving" && "Saving match result..."}
+            {reportStatus === "saved" && "Stats updated."}
+            {reportStatus === "error" &&
+              "Could not save stats (are you logged in?)"}
+          </div>
+
           <Link
             href="/"
             className="px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition"

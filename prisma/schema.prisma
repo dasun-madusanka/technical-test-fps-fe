@@ -21,4 +21,43 @@ model User {
   kills  Int @default(0)
   deaths Int @default(0)
   rating Int @default(1000)
+
+  weaponStats PlayerWeaponStat[]
+}
+
+model Weapon {
+  id       String  @id @default(cuid())
+  key      String  @unique // e.g. "rifle", "sniper", "pistol", "knife"
+  name     String
+  category String  // "primary", "secondary", "melee"
+  damage   Int
+  fireRate Int
+  magazineSize Int
+
+  variants WeaponVariant[]
+  stats    PlayerWeaponStat[]
+}
+
+model WeaponVariant {
+  id            String @id @default(cuid())
+  weaponId      String
+  weapon        Weapon @relation(fields: [weaponId], references: [id])
+  name          String
+  unlockType    String // "kills" or "headshots"
+  unlockAmount  Int
+  sortOrder     Int    @default(0)
+}
+
+model PlayerWeaponStat {
+  id        String @id @default(cuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id])
+  weaponId  String
+  weapon    Weapon @relation(fields: [weaponId], references: [id])
+  kills     Int    @default(0)
+  headshots Int    @default(0)
+  selected  Boolean @default(false)
+  selectedVariantId String?
+
+  @@unique([userId, weaponId])
 }

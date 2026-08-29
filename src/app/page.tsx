@@ -58,6 +58,12 @@ export default async function Home() {
             1v1 (BETA)
           </Link>
           <CreateRoomButton />
+          <Link
+            href="/loadout"
+            className="px-8 py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition"
+          >
+            LOADOUT
+          </Link>
         </div>
 
         <div className="grid grid-cols-3 gap-4 text-sm text-slate-500 font-mono">

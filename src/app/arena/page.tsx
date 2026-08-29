@@ -47,6 +47,7 @@ export default function ArenaPage() {
           won: state.playerWon,
           kills: state.playerKills,
           deaths: state.playerDeaths,
+          weaponKey: "rifle",
         }),
       })
         .then((res) => {
