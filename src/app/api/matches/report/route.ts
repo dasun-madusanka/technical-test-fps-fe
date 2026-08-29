@@ -34,6 +34,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  await prisma.matchResult.create({
+    data: {
+      userId: user.id,
+      won,
+      kills,
+      deaths,
+    },
+  });
+
   if (weaponKey) {
     const weapon = await prisma.weapon.findUnique({ where: { key: weaponKey } });
     if (weapon) {

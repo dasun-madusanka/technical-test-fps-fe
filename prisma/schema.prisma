@@ -25,6 +25,7 @@ model User {
   weaponStats PlayerWeaponStat[]
 
   settings UserSettings?
+  matchResults MatchResult[]
 }
 
 model Weapon {
@@ -76,4 +77,16 @@ model UserSettings {
   keyRight       String @default("KeyD")
   keyJump        String @default("Space")
   keyReload      String @default("KeyR")
+}
+
+model MatchResult {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  won       Boolean
+  kills     Int
+  deaths    Int
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
