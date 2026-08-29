@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { getGameSocket } from "@/lib/gameSocket";
+import { io } from "socket.io-client";
+
+const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || "http://localhost:4000";
 
 export default function CreateRoomButton() {
   const router = useRouter();
@@ -10,26 +12,32 @@ export default function CreateRoomButton() {
 
   const handleCreate = async () => {
     setLoading(true);
-    const res = await fetch("/api/game-token");
-    if (!res.ok) {
+
+    const [tokenRes, weaponRes] = await Promise.all([
+      fetch("/api/game-token"),
+      fetch("/api/loadout/equipped"),
+    ]);
+
+    if (!tokenRes.ok) {
       alert("You need to log in to create a private lobby.");
       setLoading(false);
       return;
     }
-    const { token } = await res.json();
+    const { token } = await tokenRes.json();
+    const weapon = weaponRes.ok ? await weaponRes.json() : null;
 
-    const socket = getGameSocket(token);
-    const onCreated = (data: { roomCode: string }) => {
-      socket.off("room:created", onCreated);
+    const socket = io(GAME_SERVER_URL, { auth: { token }, transports: ["websocket"] });
+    socket.on("connect", () => {
+      socket.emit("room:create", {
+        weapon: weapon
+          ? { damage: weapon.damage, fireRate: weapon.fireRate, magazineSize: weapon.magazineSize }
+          : undefined,
+      });
+    });
+    socket.on("room:created", (data: { roomCode: string }) => {
+      socket.disconnect();
       router.push(`/lobby/${data.roomCode}`);
-    };
-    socket.on("room:created", onCreated);
-
-    if (socket.connected) {
-      socket.emit("room:create");
-    } else {
-      socket.once("connect", () => socket.emit("room:create"));
-    }
+    });
   };
 
   return (

@@ -34,21 +34,28 @@ export default function LobbyPage() {
     let cancelled = false;
 
     async function connect() {
-      const res = await fetch("/api/game-token");
-      if (!res.ok) {
+      const [tokenRes, weaponRes] = await Promise.all([
+        fetch("/api/game-token"),
+        fetch("/api/loadout/equipped"),
+      ]);
+
+      if (!tokenRes.ok) {
         setError("You need to log in to join a lobby.");
         return;
       }
-      const { token, userId } = await res.json();
+      const { token, userId } = await tokenRes.json();
+      const weapon = weaponRes.ok ? await weaponRes.json() : null;
       if (cancelled) return;
       setMyUserId(userId);
 
       const socket = getGameSocket(token);
       socketRef.current = socket;
 
-      const onPlayerJoined = (data: { players: LobbyPlayer[] }) => setPlayers(data.players);
+      const onPlayerJoined = (data: { players: LobbyPlayer[] }) =>
+        setPlayers(data.players);
       const onRoomError = (data: { message: string }) => setError(data.message);
-      const onChatMessage = (msg: ChatMsg) => setMessages((prev) => [...prev, msg]);
+      const onChatMessage = (msg: ChatMsg) =>
+        setMessages((prev) => [...prev, msg]);
       const onMatchFound = () => {
         navigatingToMatch.current = true;
         router.push(`/match/${params.code}`);
@@ -59,7 +66,17 @@ export default function LobbyPage() {
       socket.on("room:chatMessage", onChatMessage);
       socket.on("match:found", onMatchFound);
 
-      const attemptJoin = () => socket.emit("room:join", { roomCode: params.code });
+      const attemptJoin = () =>
+        socket.emit("room:join", {
+          roomCode: params.code,
+          weapon: weapon
+            ? {
+                damage: weapon.damage,
+                fireRate: weapon.fireRate,
+                magazineSize: weapon.magazineSize,
+              }
+            : undefined,
+        });
       if (socket.connected) attemptJoin();
       else socket.once("connect", attemptJoin);
 
@@ -98,15 +115,18 @@ export default function LobbyPage() {
     disconnectGameSocket();
   };
 
-  const inviteLink = typeof window !== "undefined"
-    ? `${window.location.origin}/lobby/${params.code}`
-    : "";
+  const inviteLink =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/lobby/${params.code}`
+      : "";
 
   if (error) {
     return (
       <main className="min-h-screen bg-slate-950 flex flex-col items-center justify-center px-6 text-center">
         <p className="text-red-400 font-mono mb-4">{error}</p>
-        <Link href="/" className="text-cyan-400 hover:underline">← Back to home</Link>
+        <Link href="/" className="text-cyan-400 hover:underline">
+          ← Back to home
+        </Link>
       </main>
     );
   }
@@ -117,22 +137,33 @@ export default function LobbyPage() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-bold text-slate-200">
-              LOBBY <span className="text-cyan-400 font-mono">{params.code}</span>
+              LOBBY{" "}
+              <span className="text-cyan-400 font-mono">{params.code}</span>
             </h1>
             <p className="text-slate-500 text-sm mt-1">1v1 Duel · Arena</p>
           </div>
-          <Link href="/" onClick={handleLeave} className="text-slate-500 text-sm hover:text-slate-300">
+          <Link
+            href="/"
+            onClick={handleLeave}
+            className="text-slate-500 text-sm hover:text-slate-300"
+          >
             Leave
           </Link>
         </div>
 
         <div className="grid grid-cols-2 gap-6 mb-8">
           <PlayerSlot player={players[0]} myUserId={myUserId} label="Host" />
-          <PlayerSlot player={players[1]} myUserId={myUserId} label="Challenger" />
+          <PlayerSlot
+            player={players[1]}
+            myUserId={myUserId}
+            label="Challenger"
+          />
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 mb-6 flex items-center gap-3">
-          <span className="text-slate-500 text-sm font-mono flex-1 truncate">{inviteLink}</span>
+          <span className="text-slate-500 text-sm font-mono flex-1 truncate">
+            {inviteLink}
+          </span>
           <button
             onClick={() => navigator.clipboard.writeText(inviteLink)}
             className="px-4 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-mono transition"
@@ -150,13 +181,19 @@ export default function LobbyPage() {
           </button>
         )}
         {players.length < 2 && (
-          <p className="text-center text-slate-500 font-mono text-sm mb-6">Waiting for opponent...</p>
+          <p className="text-center text-slate-500 font-mono text-sm mb-6">
+            Waiting for opponent...
+          </p>
         )}
 
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <div className="text-slate-500 text-xs font-mono mb-3 tracking-wider">LOBBY CHAT</div>
+          <div className="text-slate-500 text-xs font-mono mb-3 tracking-wider">
+            LOBBY CHAT
+          </div>
           <div className="h-40 overflow-y-auto space-y-1 mb-3 font-mono text-sm">
-            {messages.length === 0 && <p className="text-slate-600">No messages yet</p>}
+            {messages.length === 0 && (
+              <p className="text-slate-600">No messages yet</p>
+            )}
             {messages.map((m, i) => (
               <div key={i}>
                 <span className="text-cyan-400">{m.username}</span>
@@ -173,7 +210,10 @@ export default function LobbyPage() {
               placeholder="Type a message"
               className="flex-1 bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500"
             />
-            <button onClick={sendChat} className="px-4 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm transition">
+            <button
+              onClick={sendChat}
+              className="px-4 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm transition"
+            >
               Send
             </button>
           </div>
@@ -183,7 +223,15 @@ export default function LobbyPage() {
   );
 }
 
-function PlayerSlot({ player, myUserId, label }: { player?: LobbyPlayer; myUserId: string | null; label: string }) {
+function PlayerSlot({
+  player,
+  myUserId,
+  label,
+}: {
+  player?: LobbyPlayer;
+  myUserId: string | null;
+  label: string;
+}) {
   return (
     <div className="border border-slate-800 rounded-lg p-6 text-center bg-slate-900">
       <div className="w-16 h-16 mx-auto rounded-full bg-slate-800 flex items-center justify-center mb-3">
@@ -193,7 +241,9 @@ function PlayerSlot({ player, myUserId, label }: { player?: LobbyPlayer; myUserI
         <>
           <div className="text-slate-200 font-bold">
             {player.username}
-            {player.id === myUserId && <span className="text-cyan-400 text-xs ml-2">(you)</span>}
+            {player.id === myUserId && (
+              <span className="text-cyan-400 text-xs ml-2">(you)</span>
+            )}
           </div>
           <div className="text-slate-500 text-xs font-mono mt-1">{label}</div>
         </>
