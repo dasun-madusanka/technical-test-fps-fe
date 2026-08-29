@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArenaGame, ArenaState, WeaponConfig } from "@/game/ArenaGame";
 import ArenaHUD from "@/app/components/ArenaHUD";
-import { GameSettings } from "@/game/ArenaGame";
+import { GameSettings, WeaponInventory } from "@/game/ArenaGame";
 
 const initialState: ArenaState = {
   playerHealth: 100,
@@ -34,6 +34,15 @@ export default function ArenaPage() {
 
   const [settings, setSettings] = useState<GameSettings | null>(null);
 
+  const [inventory, setInventory] = useState<WeaponInventory | null>(null);
+
+  useEffect(() => {
+    fetch("/api/loadout/inventory")
+      .then((res) => res.json())
+      .then(setInventory)
+      .catch(() => setInventory(null));
+  }, []);
+
   useEffect(() => {
     fetch("/api/settings")
       .then((res) => res.json())
@@ -49,16 +58,23 @@ export default function ArenaPage() {
   }, []);
 
   useEffect(() => {
-    if (!canvasRef.current || !weapon || !settings) return;
-    const game = new ArenaGame(canvasRef.current, setState, weapon, settings);
+    if (!canvasRef.current || !inventory || !settings) return;
+    const game = new ArenaGame(
+      canvasRef.current,
+      setState,
+      inventory,
+      settings,
+    );
     gameRef.current = game;
     return () => game.dispose();
-  }, [weapon, settings]);
+  }, [inventory, settings]);
 
   useEffect(() => {
     if (state.matchOver && !hasReported.current) {
       hasReported.current = true;
       setReportStatus("saving");
+
+      const weapons = gameRef.current?.getWeaponKillsBreakdown() ?? [];
 
       fetch("/api/matches/report", {
         method: "POST",
@@ -67,7 +83,7 @@ export default function ArenaPage() {
           won: state.playerWon,
           kills: state.playerKills,
           deaths: state.playerDeaths,
-          weaponKey: weapon?.key ?? "rifle",
+          weapons: weapons.map((w) => ({ weaponKey: w.key, kills: w.kills })),
         }),
       })
         .then((res) => {
@@ -76,13 +92,7 @@ export default function ArenaPage() {
         })
         .catch(() => setReportStatus("error"));
     }
-  }, [
-    state.matchOver,
-    state.playerWon,
-    state.playerKills,
-    state.playerDeaths,
-    weapon,
-  ]);
+  }, [state.matchOver, state.playerWon, state.playerKills, state.playerDeaths]);
 
   const handleStart = () => {
     hasReported.current = false;
@@ -157,6 +167,13 @@ export default function ArenaPage() {
             VIEW PROFILE
           </Link>
         </div>
+      )}
+
+      {inventory && (
+        <p className="text-cyan-400 font-mono text-sm mb-2">
+          1: {inventory.primary.name} · 2: {inventory.secondary.name} · 3:{" "}
+          {inventory.melee.name}
+        </p>
       )}
     </main>
   );

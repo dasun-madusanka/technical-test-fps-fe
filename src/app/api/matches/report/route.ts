@@ -13,10 +13,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
 
-  const { won, kills, deaths, headshots = 0, weaponKey } = await req.json();
+  const { won, kills, deaths, weapons } = await req.json();
 
-  if (typeof won !== "boolean" || typeof kills !== "number" || typeof deaths !== "number") {
-    return NextResponse.json({ error: "Invalid match report." }, { status: 400 });
+  if (
+    typeof won !== "boolean" ||
+    typeof kills !== "number" ||
+    typeof deaths !== "number"
+  ) {
+    return NextResponse.json(
+      { error: "Invalid match report." },
+      { status: 400 },
+    );
   }
 
   const ratingDelta = won ? RATING_WIN : RATING_LOSS;
@@ -35,28 +42,27 @@ export async function POST(req: NextRequest) {
   });
 
   await prisma.matchResult.create({
-    data: {
-      userId: user.id,
-      won,
-      kills,
-      deaths,
-    },
+    data: { userId: user.id, won, kills, deaths },
   });
 
-  if (weaponKey) {
-    const weapon = await prisma.weapon.findUnique({ where: { key: weaponKey } });
-    if (weapon) {
+  if (Array.isArray(weapons)) {
+    for (const w of weapons) {
+      if (!w.weaponKey || !w.kills) continue;
+      const weapon = await prisma.weapon.findUnique({
+        where: { key: w.weaponKey },
+      });
+      if (!weapon) continue;
       await prisma.playerWeaponStat.upsert({
         where: { userId_weaponId: { userId: user.id, weaponId: weapon.id } },
         update: {
-          kills: { increment: kills },
-          headshots: { increment: headshots },
+          kills: { increment: w.kills },
+          headshots: { increment: w.headshots ?? 0 },
         },
         create: {
           userId: user.id,
           weaponId: weapon.id,
-          kills,
-          headshots,
+          kills: w.kills,
+          headshots: w.headshots ?? 0,
         },
       });
     }

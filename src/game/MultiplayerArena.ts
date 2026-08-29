@@ -1,6 +1,11 @@
 import * as THREE from "three";
-import { io, Socket } from "socket.io-client";
-import { WeaponConfig, GameSettings } from "./ArenaGame";
+import { Socket } from "socket.io-client";
+import {
+  GameSettings,
+  WeaponConfig,
+  WeaponInventory,
+  DEFAULT_SETTINGS,
+} from "./ArenaGame";
 
 export interface MultiplayerState {
   connectionStatus:
@@ -22,30 +27,41 @@ export interface MultiplayerState {
   killFeed: string[];
   matchOver: boolean;
   won: boolean;
+  weaponBreakdown: { weaponKey: string; kills: number }[];
 }
 
 type StateListener = (state: MultiplayerState) => void;
 
-const GAME_SERVER_URL =
-  process.env.NEXT_PUBLIC_GAME_SERVER_URL || "http://localhost:4000";
 const ARENA_HALF_SIZE = 15;
 const PLAYER_SPEED = 5.5;
 const PLAYER_HEIGHT = 1.6;
 const GRAVITY = -18;
 const JUMP_SPEED = 6.5;
-const MAGAZINE_SIZE = 30;
 const RELOAD_TIME_MS = 1500;
-const FIRE_INTERVAL_MS = 180;
 const MOVE_SEND_INTERVAL_MS = 50;
 
-const DEFAULT_SETTINGS: GameSettings = {
-  mouseSens: 0.7,
-  keyForward: "KeyW",
-  keyBackward: "KeyS",
-  keyLeft: "KeyA",
-  keyRight: "KeyD",
-  keyJump: "Space",
-  keyReload: "KeyR",
+const DEFAULT_INVENTORY: WeaponInventory = {
+  primary: {
+    key: "rifle",
+    name: "Assault Rifle",
+    damage: 20,
+    fireRate: 750,
+    magazineSize: 30,
+  },
+  secondary: {
+    key: "pistol",
+    name: "Combat Pistol",
+    damage: 25,
+    fireRate: 400,
+    magazineSize: 12,
+  },
+  melee: {
+    key: "knife",
+    name: "Combat Knife",
+    damage: 75,
+    fireRate: 150,
+    magazineSize: 1,
+  },
 };
 
 export class MultiplayerArena {
@@ -67,6 +83,16 @@ export class MultiplayerArena {
   private lastShotTime = 0;
   private lastMoveSent = 0;
   private reloading = false;
+  private settings: GameSettings;
+
+  private inventory: WeaponConfig[];
+  private ammoPerWeapon: number[];
+  private currentSlot = 0;
+  private lastSlot = 0;
+
+  private get weapon(): WeaponConfig {
+    return this.inventory[this.currentSlot];
+  }
 
   private opponentMesh: THREE.Mesh | null = null;
   private opponentTargetPos = new THREE.Vector3();
@@ -74,7 +100,7 @@ export class MultiplayerArena {
   private state: MultiplayerState = {
     connectionStatus: "connecting",
     myHealth: 100,
-    myAmmo: MAGAZINE_SIZE,
+    myAmmo: 30,
     isReloading: false,
     myKills: 0,
     myDeaths: 0,
@@ -86,24 +112,26 @@ export class MultiplayerArena {
     killFeed: [],
     matchOver: false,
     won: false,
+    weaponBreakdown: [],
   };
   private onState: StateListener;
   private myUserId: string | null = null;
-  private weapon?: WeaponConfig;
-  private settings: GameSettings;
 
   constructor(
     canvas: HTMLCanvasElement,
     socket: Socket,
     onState: StateListener,
     roomCode?: string,
-    weapon?: WeaponConfig,
+    inventory: WeaponInventory = DEFAULT_INVENTORY,
     settings: GameSettings = DEFAULT_SETTINGS,
   ) {
     this.canvas = canvas;
     this.onState = onState;
     this.socket = socket;
     this.settings = settings;
+    this.inventory = [inventory.primary, inventory.secondary, inventory.melee];
+    this.ammoPerWeapon = this.inventory.map((w) => w.magazineSize);
+    this.state.myAmmo = this.ammoPerWeapon[0];
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
@@ -130,11 +158,6 @@ export class MultiplayerArena {
     document.addEventListener("keydown", this.handleKeyDown);
     document.addEventListener("keyup", this.handleKeyUp);
 
-    // this.socket = io(GAME_SERVER_URL, { auth: { token }, transports: ["websocket"] });
-    // this.registerSocketHandlers();
-
-    // this.socket = io(GAME_SERVER_URL, { auth: { token }, transports: ["websocket"] });
-    this.weapon = weapon;
     this.registerSocketHandlers(roomCode);
   }
 
@@ -145,18 +168,17 @@ export class MultiplayerArena {
   private registerSocketHandlers(roomCode?: string) {
     const startFlow = () => {
       this.updateState({ connectionStatus: "queued" });
-      const weaponPayload = this.weapon
-        ? {
-            damage: this.weapon.damage,
-            fireRate: this.weapon.fireRate,
-            magazineSize: this.weapon.magazineSize,
-          }
-        : undefined;
-
       if (roomCode) {
         this.socket.emit("match:enter", { roomCode });
       } else {
-        this.socket.emit("queue:join", { weapon: weaponPayload });
+        this.socket.emit("queue:join", {
+          inventory: this.inventory.map((w) => ({
+            key: w.key,
+            damage: w.damage,
+            fireRate: w.fireRate,
+            magazineSize: w.magazineSize,
+          })),
+        });
       }
     };
 
@@ -193,6 +215,7 @@ export class MultiplayerArena {
           yaw: number;
           health: number;
           ammo: number;
+          weaponKey?: string;
           kills: number;
           deaths: number;
           alive: boolean;
@@ -228,10 +251,12 @@ export class MultiplayerArena {
       (data: { userId: string; x: number; y: number; z: number }) => {
         if (data.userId === this.myUserId) {
           this.camera.position.set(data.x, data.y, data.z);
+          this.currentSlot = 0;
+          this.ammoPerWeapon = this.inventory.map((w) => w.magazineSize);
           this.updateState({
             isDead: false,
             myHealth: 100,
-            myAmmo: MAGAZINE_SIZE,
+            myAmmo: this.ammoPerWeapon[0],
           });
         } else if (this.opponentMesh) {
           this.opponentMesh.position.set(data.x, data.y, data.z);
@@ -249,6 +274,7 @@ export class MultiplayerArena {
           kills: number;
           deaths: number;
           won: boolean;
+          weapons: { weaponKey: string; kills: number }[];
         }[];
       }) => {
         const me = data.results.find((r) => r.userId === this.myUserId);
@@ -258,6 +284,7 @@ export class MultiplayerArena {
           won: !!me?.won,
           myKills: me?.kills ?? this.state.myKills,
           myDeaths: me?.deaths ?? this.state.myDeaths,
+          weaponBreakdown: me?.weapons ?? [],
         });
       },
     );
@@ -277,6 +304,7 @@ export class MultiplayerArena {
       yaw: number;
       health: number;
       ammo: number;
+      weaponKey?: string;
       kills: number;
       deaths: number;
       alive: boolean;
@@ -286,7 +314,6 @@ export class MultiplayerArena {
       if (p.id === this.myUserId) {
         this.updateState({
           myHealth: p.health,
-          myAmmo: p.ammo,
           myKills: p.kills,
           myDeaths: p.deaths,
         });
@@ -364,6 +391,10 @@ export class MultiplayerArena {
     this.keys[e.code] = true;
     if (e.code === this.settings.keyReload) this.reload();
     if (e.code === this.settings.keyJump) this.jump();
+    if (e.code === "Digit1") this.switchToSlot(0);
+    if (e.code === "Digit2") this.switchToSlot(1);
+    if (e.code === "Digit3") this.switchToSlot(2);
+    if (e.code === "KeyQ") this.quickSwitch();
   };
   private handleKeyUp = (e: KeyboardEvent) => {
     this.keys[e.code] = false;
@@ -375,9 +406,23 @@ export class MultiplayerArena {
     this.isGrounded = false;
   }
 
+  private switchToSlot(slot: number) {
+    if (slot === this.currentSlot || this.state.isDead || slot < 0 || slot > 2)
+      return;
+    this.lastSlot = this.currentSlot;
+    this.currentSlot = slot;
+    this.reloading = false;
+    this.updateState({ isReloading: false, myAmmo: this.ammoPerWeapon[slot] });
+    this.socket.emit("player:switchWeapon", { slot });
+  }
+
+  private quickSwitch() {
+    this.switchToSlot(this.lastSlot);
+  }
+
   private handleMouseMove = (e: MouseEvent) => {
     if (document.pointerLockElement !== this.canvas) return;
-    const sensitivity = 0.0022 * (this.settings.mouseSens / 0.7); // 0.7 is our baseline "1x"
+    const sensitivity = 0.0022 * (this.settings.mouseSens / 0.7);
     this.yaw -= e.movementX * sensitivity;
     this.pitch -= e.movementY * sensitivity;
     this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
@@ -404,7 +449,8 @@ export class MultiplayerArena {
   private shoot() {
     if (this.state.isDead || this.reloading || this.state.matchOver) return;
     const now = performance.now();
-    if (now - this.lastShotTime < FIRE_INTERVAL_MS) return;
+    const fireIntervalMs = 60000 / this.weapon.fireRate;
+    if (now - this.lastShotTime < fireIntervalMs) return;
     if (this.state.myAmmo <= 0) {
       this.reload();
       return;
@@ -423,18 +469,29 @@ export class MultiplayerArena {
       direction: { x: direction.x, y: direction.y, z: direction.z },
     });
 
-    // optimistic local ammo feedback only — server is authoritative and corrects via state:update
-    this.updateState({ myAmmo: Math.max(0, this.state.myAmmo - 1) });
+    this.ammoPerWeapon[this.currentSlot] = Math.max(
+      0,
+      this.ammoPerWeapon[this.currentSlot] - 1,
+    );
+    this.updateState({ myAmmo: this.ammoPerWeapon[this.currentSlot] });
   }
 
   private reload() {
-    if (this.reloading || this.state.myAmmo === MAGAZINE_SIZE) return;
+    if (this.reloading || this.state.myAmmo === this.weapon.magazineSize)
+      return;
     this.reloading = true;
     this.updateState({ isReloading: true });
     this.socket.emit("player:reload");
+
+    const slotAtReloadStart = this.currentSlot;
+    const magSize = this.inventory[slotAtReloadStart].magazineSize;
+
     setTimeout(() => {
+      this.ammoPerWeapon[slotAtReloadStart] = magSize;
       this.reloading = false;
-      this.updateState({ isReloading: false, myAmmo: MAGAZINE_SIZE });
+      if (this.currentSlot === slotAtReloadStart) {
+        this.updateState({ isReloading: false, myAmmo: magSize });
+      }
     }, RELOAD_TIME_MS);
   }
 
@@ -540,7 +597,7 @@ export class MultiplayerArena {
     document.removeEventListener("mousemove", this.handleMouseMove);
     document.removeEventListener("keydown", this.handleKeyDown);
     document.removeEventListener("keyup", this.handleKeyUp);
-    this.socket.removeAllListeners(); // safe here since each match page owns a fresh listener set
+    this.socket.removeAllListeners();
     this.renderer.dispose();
   }
 }

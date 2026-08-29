@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { MultiplayerArena, MultiplayerState } from "@/game/MultiplayerArena";
-import { GameSettings, WeaponConfig } from "@/game/ArenaGame";
+import { GameSettings, WeaponInventory } from "@/game/ArenaGame";
 import { getGameSocket, disconnectGameSocket } from "@/lib/gameSocket";
 
 const initialState: MultiplayerState = {
@@ -22,6 +22,7 @@ const initialState: MultiplayerState = {
   killFeed: [],
   matchOver: false,
   won: false,
+  weaponBreakdown: [],
 };
 
 export default function QueuePage() {
@@ -30,16 +31,16 @@ export default function QueuePage() {
   const gameRef = useRef<MultiplayerArena | null>(null);
   const [state, setState] = useState<MultiplayerState>(initialState);
   const [error, setError] = useState("");
-  const [weapon, setWeapon] = useState<WeaponConfig | null>(null);
+  const [inventory, setInventory] = useState<WeaponInventory | null>(null);
   const [settings, setSettings] = useState<GameSettings | null>(null);
   const [reportStatus, setReportStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const hasReported = useRef(false);
 
   useEffect(() => {
-    fetch("/api/loadout/equipped")
-      .then((res) => (res.ok ? res.json() : null))
-      .then(setWeapon)
-      .catch(() => setWeapon(null));
+    fetch("/api/loadout/inventory")
+      .then((res) => res.json())
+      .then(setInventory)
+      .catch(() => setInventory(null));
   }, []);
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export default function QueuePage() {
         return;
       }
       const { token, userId } = await res.json();
-      if (cancelled || !canvasRef.current || !weapon || !settings) return;
+      if (cancelled || !canvasRef.current || !inventory || !settings) return;
 
       const socket = getGameSocket(token);
       const game = new MultiplayerArena(
@@ -67,7 +68,7 @@ export default function QueuePage() {
         socket,
         setState,
         undefined,
-        weapon,
+        inventory,
         settings
       );
       game.setMyUserId(userId);
@@ -80,7 +81,7 @@ export default function QueuePage() {
       cancelled = true;
       gameRef.current?.dispose();
     };
-  }, [weapon, settings]);
+  }, [inventory, settings]);
 
   useEffect(() => {
     if (state.matchOver && !hasReported.current) {
@@ -94,7 +95,7 @@ export default function QueuePage() {
           won: state.won,
           kills: state.myKills,
           deaths: state.myDeaths,
-          weaponKey: weapon?.key ?? "rifle",
+          weapons: state.weaponBreakdown,
         }),
       })
         .then((res) => {
@@ -103,7 +104,7 @@ export default function QueuePage() {
         })
         .catch(() => setReportStatus("error"));
     }
-  }, [state.matchOver, state.won, state.myKills, state.myDeaths, weapon]);
+  }, [state.matchOver, state.won, state.myKills, state.myDeaths, state.weaponBreakdown]);
 
   return (
     <main className="relative overflow-hidden bg-black" style={{ width: "100vw", height: "100vh" }}>
@@ -128,7 +129,7 @@ export default function QueuePage() {
             <div className="flex justify-between">
               <span className="text-slate-400">AMMO</span>
               <span className={state.isReloading ? "text-yellow-400" : ""}>
-                {state.isReloading ? "RELOADING..." : `${state.myAmmo} / ${weapon?.magazineSize ?? 30}`}
+                {state.isReloading ? "RELOADING..." : state.myAmmo}
               </span>
             </div>
           </div>

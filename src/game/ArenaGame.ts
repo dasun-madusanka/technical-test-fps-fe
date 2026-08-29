@@ -13,6 +13,29 @@ export interface ArenaState {
   killFeed: string[];
   matchOver: boolean;
   playerWon: boolean;
+  currentWeaponName: string;
+  currentWeaponSlot: number;
+}
+
+type StateListener = (state: ArenaState) => void;
+
+interface Target {
+  mesh: THREE.Mesh;
+  spawnTime: number;
+}
+
+export interface WeaponConfig {
+  key: string;
+  name: string;
+  damage: number;
+  fireRate: number; // rounds per minute
+  magazineSize: number;
+}
+
+export interface WeaponInventory {
+  primary: WeaponConfig;
+  secondary: WeaponConfig;
+  melee: WeaponConfig;
 }
 
 export interface GameSettings {
@@ -25,7 +48,37 @@ export interface GameSettings {
   keyReload: string;
 }
 
-const DEFAULT_SETTINGS: GameSettings = {
+const DEFAULT_WEAPON: WeaponConfig = {
+  key: "rifle",
+  name: "Assault Rifle",
+  damage: 20,
+  fireRate: 750,
+  magazineSize: 30,
+};
+
+const DEFAULT_SECONDARY: WeaponConfig = {
+  key: "pistol",
+  name: "Combat Pistol",
+  damage: 25,
+  fireRate: 400,
+  magazineSize: 12,
+};
+
+const DEFAULT_MELEE: WeaponConfig = {
+  key: "knife",
+  name: "Combat Knife",
+  damage: 75,
+  fireRate: 150,
+  magazineSize: 1,
+};
+
+const DEFAULT_INVENTORY: WeaponInventory = {
+  primary: DEFAULT_WEAPON,
+  secondary: DEFAULT_SECONDARY,
+  melee: DEFAULT_MELEE,
+};
+
+export const DEFAULT_SETTINGS: GameSettings = {
   mouseSens: 0.7,
   keyForward: "KeyW",
   keyBackward: "KeyS",
@@ -35,36 +88,19 @@ const DEFAULT_SETTINGS: GameSettings = {
   keyReload: "KeyR",
 };
 
-type StateListener = (state: ArenaState) => void;
-
 const ARENA_HALF_SIZE = 15;
 const PLAYER_SPEED = 5.5;
 const PLAYER_HEIGHT = 1.6;
-export interface WeaponConfig {
-  key: string;
-  name: string;
-  damage: number;
-  fireRate: number; // rounds per minute
-  magazineSize: number;
-}
-
-const DEFAULT_WEAPON: WeaponConfig = {
-  key: "rifle",
-  name: "Assault Rifle",
-  damage: 20,
-  fireRate: 750,
-  magazineSize: 30,
-};
 const RELOAD_TIME_MS = 1500;
 const BOT_DAMAGE = 12;
 const BOT_FIRE_INTERVAL_MS = 900;
 const BOT_HEALTH_MAX = 100;
 const PLAYER_HEALTH_MAX = 100;
 const RESPAWN_SECONDS = 3;
+const SCORE_LIMIT = 10;
 const GRAVITY = -18;
 const JUMP_SPEED = 6.5;
 const GROUND_Y = PLAYER_HEIGHT;
-const SCORE_LIMIT = 10;
 
 export class ArenaGame {
   private renderer: THREE.WebGLRenderer;
@@ -75,17 +111,28 @@ export class ArenaGame {
   private animationId = 0;
   private canvas: HTMLCanvasElement;
   private running = false;
-  private weapon: WeaponConfig;
 
   // player
   private yaw = 0;
   private pitch = 0;
   private velocity = new THREE.Vector3();
+  private verticalVelocity = 0;
+  private isGrounded = true;
   private keys: Record<string, boolean> = {};
   private lastShotTime = 0;
   private reloading = false;
-  private verticalVelocity = 0;
-  private isGrounded = true;
+  private settings: GameSettings;
+
+  // weapons
+  private inventory: WeaponConfig[]; // [primary, secondary, melee]
+  private ammoPerWeapon: number[];
+  private currentSlot = 0;
+  private lastSlot = 0;
+  private weaponKills = [0, 0, 0];
+
+  private get weapon(): WeaponConfig {
+    return this.inventory[this.currentSlot];
+  }
 
   // bot
   private botMesh: THREE.Mesh;
@@ -96,27 +143,26 @@ export class ArenaGame {
   private botRetargetTimer = 0;
 
   private obstacles: THREE.Mesh[] = [];
+
   private state: ArenaState;
-
-  private settings: GameSettings;
-
   private onState: StateListener;
 
   constructor(
     canvas: HTMLCanvasElement,
     onState: StateListener,
-    weapon: WeaponConfig = DEFAULT_WEAPON,
+    inventory: WeaponInventory = DEFAULT_INVENTORY,
     settings: GameSettings = DEFAULT_SETTINGS,
   ) {
     this.canvas = canvas;
     this.onState = onState;
-    this.weapon = weapon;
+    this.inventory = [inventory.primary, inventory.secondary, inventory.melee];
+    this.ammoPerWeapon = this.inventory.map((w) => w.magazineSize);
     this.settings = settings;
 
     this.state = {
       playerHealth: PLAYER_HEALTH_MAX,
-      playerAmmo: this.weapon.magazineSize,
-      magazineSize: this.weapon.magazineSize,
+      playerAmmo: this.ammoPerWeapon[0],
+      magazineSize: this.inventory[0].magazineSize,
       isReloading: false,
       playerKills: 0,
       playerDeaths: 0,
@@ -126,6 +172,8 @@ export class ArenaGame {
       killFeed: [],
       matchOver: false,
       playerWon: false,
+      currentWeaponName: this.inventory[0].name,
+      currentWeaponSlot: 0,
     };
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -197,7 +245,6 @@ export class ArenaGame {
       this.scene.add(wall);
     }
 
-    // cover blocks scattered in the arena
     const coverMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
     const coverPositions: [number, number][] = [
       [4, 4],
@@ -240,6 +287,10 @@ export class ArenaGame {
     this.keys[e.code] = true;
     if (e.code === this.settings.keyReload) this.reload();
     if (e.code === this.settings.keyJump) this.jump();
+    if (e.code === "Digit1") this.switchToSlot(0);
+    if (e.code === "Digit2") this.switchToSlot(1);
+    if (e.code === "Digit3") this.switchToSlot(2);
+    if (e.code === "KeyQ") this.quickSwitch();
   };
   private handleKeyUp = (e: KeyboardEvent) => {
     this.keys[e.code] = false;
@@ -253,7 +304,7 @@ export class ArenaGame {
 
   private handleMouseMove = (e: MouseEvent) => {
     if (document.pointerLockElement !== this.canvas) return;
-    const sensitivity = 0.0022 * (this.settings.mouseSens / 0.7); // 0.7 is our baseline "1x"
+    const sensitivity = 0.0022 * (this.settings.mouseSens / 0.7);
     this.yaw -= e.movementX * sensitivity;
     this.pitch -= e.movementY * sensitivity;
     this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
@@ -279,8 +330,32 @@ export class ArenaGame {
 
   // ---------- weapon ----------
 
+  private switchToSlot(slot: number) {
+    if (
+      slot === this.currentSlot ||
+      this.state.isPlayerDead ||
+      slot < 0 ||
+      slot > 2
+    )
+      return;
+    this.lastSlot = this.currentSlot;
+    this.currentSlot = slot;
+    this.reloading = false;
+    this.state.isReloading = false;
+    this.state.playerAmmo = this.ammoPerWeapon[slot];
+    this.state.magazineSize = this.inventory[slot].magazineSize;
+    this.state.currentWeaponName = this.inventory[slot].name;
+    this.state.currentWeaponSlot = slot;
+    this.emitState();
+  }
+
+  private quickSwitch() {
+    this.switchToSlot(this.lastSlot);
+  }
+
   private shoot() {
-    if (this.state.isPlayerDead || this.reloading) return;
+    if (this.state.isPlayerDead || this.reloading || this.state.matchOver)
+      return;
     const now = performance.now();
     const fireIntervalMs = 60000 / this.weapon.fireRate;
     if (now - this.lastShotTime < fireIntervalMs) return;
@@ -291,6 +366,7 @@ export class ArenaGame {
 
     this.lastShotTime = now;
     this.state.playerAmmo -= 1;
+    this.ammoPerWeapon[this.currentSlot] = this.state.playerAmmo;
 
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
     const targets = this.botAlive
@@ -311,11 +387,18 @@ export class ArenaGame {
     this.reloading = true;
     this.state.isReloading = true;
     this.emitState();
+
+    const slotAtReloadStart = this.currentSlot;
+    const magSize = this.inventory[slotAtReloadStart].magazineSize;
+
     setTimeout(() => {
-      this.state.playerAmmo = this.weapon.magazineSize;
-      this.reloading = false;
-      this.state.isReloading = false;
-      this.emitState();
+      this.ammoPerWeapon[slotAtReloadStart] = magSize;
+      if (this.currentSlot === slotAtReloadStart) {
+        this.state.playerAmmo = magSize;
+        this.reloading = false;
+        this.state.isReloading = false;
+        this.emitState();
+      }
     }, RELOAD_TIME_MS);
   }
 
@@ -326,6 +409,7 @@ export class ArenaGame {
       this.botAlive = false;
       this.scene.remove(this.botMesh);
       this.state.playerKills += 1;
+      this.weaponKills[this.currentSlot] += 1;
       this.pushKillFeed("You eliminated the bot");
 
       if (this.state.playerKills >= SCORE_LIMIT) {
@@ -382,7 +466,12 @@ export class ArenaGame {
   private respawnPlayer() {
     this.resetPlayerPosition();
     this.state.playerHealth = PLAYER_HEALTH_MAX;
-    this.state.playerAmmo = this.weapon.magazineSize;
+    this.currentSlot = 0;
+    this.ammoPerWeapon = this.inventory.map((w) => w.magazineSize);
+    this.state.playerAmmo = this.ammoPerWeapon[0];
+    this.state.magazineSize = this.inventory[0].magazineSize;
+    this.state.currentWeaponName = this.inventory[0].name;
+    this.state.currentWeaponSlot = 0;
     this.state.isPlayerDead = false;
     this.emitState();
   }
@@ -393,6 +482,13 @@ export class ArenaGame {
 
   private emitState() {
     this.onState({ ...this.state, killFeed: [...this.state.killFeed] });
+  }
+
+  getWeaponKillsBreakdown(): { key: string; kills: number }[] {
+    return this.inventory.map((w, i) => ({
+      key: w.key,
+      kills: this.weaponKills[i],
+    }));
   }
 
   // ---------- movement ----------
@@ -427,7 +523,6 @@ export class ArenaGame {
       this.camera.position.z = next.z;
     }
 
-    // vertical movement (jump/gravity)
     this.verticalVelocity += GRAVITY * delta;
     this.camera.position.y += this.verticalVelocity * delta;
 

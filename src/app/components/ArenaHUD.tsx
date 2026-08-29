@@ -75,10 +75,18 @@ export default function ArenaHUD({
           <div className="text-slate-500 font-mono text-sm">
             {reportStatus === "saving" && "Saving match result..."}
             {reportStatus === "saved" && "Stats updated."}
-            {reportStatus === "error" && "Could not save stats (are you logged in?)"}
+            {reportStatus === "error" &&
+              "Could not save stats (are you logged in?)"}
           </div>
         </div>
       )}
+
+      <div className="flex justify-between">
+        <span className="text-slate-400">WEAPON</span>
+        <span className="text-slate-200">
+          [{state.currentWeaponSlot + 1}] {state.currentWeaponName}
+        </span>
+      </div>
     </>
   );
 }
