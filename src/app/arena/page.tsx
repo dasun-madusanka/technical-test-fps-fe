@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArenaGame, ArenaState } from "@/game/ArenaGame";
+import { ArenaGame, ArenaState, WeaponConfig } from "@/game/ArenaGame";
 import ArenaHUD from "@/app/components/ArenaHUD";
 
 const initialState: ArenaState = {
@@ -25,15 +25,23 @@ export default function ArenaPage() {
   const gameRef = useRef<ArenaGame | null>(null);
   const [state, setState] = useState<ArenaState>(initialState);
   const [started, setStarted] = useState(false);
+  const [weapon, setWeapon] = useState<WeaponConfig | null>(null);
   const [reportStatus, setReportStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const hasReported = useRef(false);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
-    const game = new ArenaGame(canvasRef.current, setState);
+    fetch("/api/loadout/equipped")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setWeapon(data))
+      .catch(() => setWeapon(null));
+  }, []);
+
+  useEffect(() => {
+    if (!canvasRef.current || !weapon) return;
+    const game = new ArenaGame(canvasRef.current, setState, weapon);
     gameRef.current = game;
     return () => game.dispose();
-  }, []);
+  }, [weapon]);
 
   useEffect(() => {
     if (state.matchOver && !hasReported.current) {
@@ -47,7 +55,7 @@ export default function ArenaPage() {
           won: state.playerWon,
           kills: state.playerKills,
           deaths: state.playerDeaths,
-          weaponKey: "rifle",
+          weaponKey: weapon?.key ?? "rifle",
         }),
       })
         .then((res) => {
@@ -56,7 +64,7 @@ export default function ArenaPage() {
         })
         .catch(() => setReportStatus("error"));
     }
-  }, [state.matchOver, state.playerWon, state.playerKills, state.playerDeaths]);
+  }, [state.matchOver, state.playerWon, state.playerKills, state.playerDeaths, weapon]);
 
   const handleStart = () => {
     hasReported.current = false;
@@ -67,39 +75,33 @@ export default function ArenaPage() {
   };
 
   return (
-    <main
-      className="relative overflow-hidden bg-black"
-      style={{ width: "100vw", height: "100vh" }}
-    >
-      <canvas
-        ref={canvasRef}
-        className="block"
-        style={{ width: "100%", height: "100%" }}
-      />
+    <main className="relative overflow-hidden bg-black" style={{ width: "100vw", height: "100vh" }}>
+      <canvas ref={canvasRef} className="block" style={{ width: "100%", height: "100%" }} />
 
       {started && <ArenaHUD state={state} reportStatus={reportStatus} />}
-      {started && !state.isPlayerDead && !state.matchOver && (
-        <div className="crosshair" />
-      )}
+      {started && !state.isPlayerDead && !state.matchOver && <div className="crosshair" />}
 
-      {!started && (
+      {!started && weapon && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/70 text-center px-6">
           <h1 className="text-3xl font-bold text-cyan-400 mb-2">ARENA</h1>
-          <p className="text-slate-400 mb-2 max-w-sm">
+          <p className="text-slate-400 mb-1 max-w-sm">
             WASD to move, mouse to look, click to shoot, R to reload, Space to jump.
           </p>
-          <p className="text-slate-500 mb-6 max-w-sm text-sm">
-            First to 10 kills wins the match.
-          </p>
+          <p className="text-cyan-400 font-mono text-sm mb-2">Equipped: {weapon.name}</p>
+          <p className="text-slate-500 mb-6 max-w-sm text-sm">First to 10 kills wins the match.</p>
           <button
             onClick={handleStart}
             className="px-8 py-3 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition mb-4"
           >
             START
           </button>
-          <Link href="/" className="text-slate-500 text-sm hover:text-slate-300">
-            ← Back to home
-          </Link>
+          <Link href="/" className="text-slate-500 text-sm hover:text-slate-300">← Back to home</Link>
+        </div>
+      )}
+
+      {!weapon && !started && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70">
+          <p className="text-slate-500 font-mono">Loading loadout...</p>
         </div>
       )}
 
@@ -111,10 +113,7 @@ export default function ArenaPage() {
           >
             PLAY AGAIN
           </button>
-          <Link
-            href="/profile"
-            className="px-6 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition"
-          >
+          <Link href="/profile" className="px-6 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition">
             VIEW PROFILE
           </Link>
         </div>

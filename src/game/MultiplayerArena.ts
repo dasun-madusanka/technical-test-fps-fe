@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { io, Socket } from "socket.io-client";
+import { WeaponConfig } from "./ArenaGame";
 
 export interface MultiplayerState {
   connectionStatus:
@@ -78,8 +79,15 @@ export class MultiplayerArena {
   };
   private onState: StateListener;
   private myUserId: string | null = null;
+  private weapon?: WeaponConfig;
 
-  constructor(canvas: HTMLCanvasElement, socket: Socket, onState: StateListener, roomCode?: string) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    socket: Socket,
+    onState: StateListener,
+    roomCode?: string,
+    weapon?: WeaponConfig,
+  ) {
     this.canvas = canvas;
     this.onState = onState;
     this.socket = socket;
@@ -113,6 +121,7 @@ export class MultiplayerArena {
     // this.registerSocketHandlers();
 
     // this.socket = io(GAME_SERVER_URL, { auth: { token }, transports: ["websocket"] });
+    this.weapon = weapon;
     this.registerSocketHandlers(roomCode);
   }
 
@@ -121,12 +130,16 @@ export class MultiplayerArena {
   }
 
   private registerSocketHandlers(roomCode?: string) {
-    const startFlow = () => {
+        const startFlow = () => {
       this.updateState({ connectionStatus: "queued" });
+      const weaponPayload = this.weapon
+        ? { damage: this.weapon.damage, fireRate: this.weapon.fireRate, magazineSize: this.weapon.magazineSize }
+        : undefined;
+
       if (roomCode) {
-        this.socket.emit("match:enter", { roomCode });
+        this.socket.emit("match:enter", { roomCode }); 
       } else {
-        this.socket.emit("queue:join");
+        this.socket.emit("queue:join", { weapon: weaponPayload });
       }
     };
 

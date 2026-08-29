@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { MultiplayerArena, MultiplayerState } from "@/game/MultiplayerArena";
 import { getGameSocket, disconnectGameSocket } from "@/lib/gameSocket";
+import { WeaponConfig } from "@/game/ArenaGame";
 
 const initialState: MultiplayerState = {
   connectionStatus: "connecting",
@@ -30,7 +31,15 @@ export default function QueuePage() {
   const [reportStatus, setReportStatus] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
+  const [weapon, setWeapon] = useState<WeaponConfig | null>(null);
   const hasReported = useRef(false);
+
+  useEffect(() => {
+    fetch("/api/loadout/equipped")
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setWeapon)
+      .catch(() => setWeapon(null));
+  }, []);
 
   useEffect(() => {
     if (state.matchOver && !hasReported.current) {
@@ -57,7 +66,6 @@ export default function QueuePage() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function setup() {
       const res = await fetch("/api/game-token");
       if (!res.ok) {
@@ -65,21 +73,25 @@ export default function QueuePage() {
         return;
       }
       const { token, userId } = await res.json();
-      if (cancelled || !canvasRef.current) return;
+      if (cancelled || !canvasRef.current || !weapon) return;
 
       const socket = getGameSocket(token);
-      const game = new MultiplayerArena(canvasRef.current, socket, setState); // omit params.code on /queue
+      const game = new MultiplayerArena(
+        canvasRef.current,
+        socket,
+        setState,
+        undefined,
+        weapon,
+      );
       game.setMyUserId(userId);
       gameRef.current = game;
     }
-
     setup();
-
     return () => {
       cancelled = true;
       gameRef.current?.dispose();
     };
-  }, []);
+  }, [weapon]);
 
   return (
     <main
