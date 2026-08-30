@@ -1,6 +1,6 @@
 import { io, Socket } from "socket.io-client";
 
-const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || "http://localhost:4000";
+const GAME_SERVER_URL = "http://localhost:4000";
 
 let socket: Socket | null = null;
 
