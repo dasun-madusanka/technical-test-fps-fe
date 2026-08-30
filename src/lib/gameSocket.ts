@@ -1,6 +1,6 @@
 import { io, Socket } from "socket.io-client";
 
-const GAME_SERVER_URL = "http://localhost:4000";
+const GAME_SERVER_URL = "https://technical-test-fps-server.onrender.com";
 
 let socket: Socket | null = null;
 

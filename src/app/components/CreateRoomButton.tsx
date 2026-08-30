@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { io } from "socket.io-client";
 
-const GAME_SERVER_URL = "http://localhost:4000";
+const GAME_SERVER_URL = "https://technical-test-fps-server.onrender.com";
 
 export default function CreateRoomButton() {
   const router = useRouter();
