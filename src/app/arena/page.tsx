@@ -19,6 +19,8 @@ const initialState: ArenaState = {
   killFeed: [],
   matchOver: false,
   playerWon: false,
+  currentWeaponName: "Assault Rifle",
+  currentWeaponSlot: 1,
 };
 
 export default function ArenaPage() {

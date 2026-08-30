@@ -14,7 +14,9 @@ interface Settings {
   keyReload: string;
 }
 
-const KEY_LABELS: { field: keyof Settings; label: string }[] = [
+type KeyBindingField = Extract<keyof Settings, `key${string}`>;
+
+const KEY_LABELS: { field: KeyBindingField; label: string }[] = [
   { field: "keyForward", label: "Forward" },
   { field: "keyBackward", label: "Backward" },
   { field: "keyLeft", label: "Left" },
