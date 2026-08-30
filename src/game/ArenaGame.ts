@@ -843,7 +843,7 @@ export class ArenaGame {
       Math.sin(this.yaw + Math.PI / 2),
       0,
       Math.cos(this.yaw + Math.PI / 2),
-    );
+    ).negate();
 
     this.velocity.set(0, 0, 0);
     if (this.keys[this.settings.keyForward]) this.velocity.add(forward);
@@ -902,13 +902,7 @@ export class ArenaGame {
       gameAssets.playAction(this.bot, "Idle_Gun", 0.2);
     }
 
-    const lookTarget = new THREE.Vector3(
-      this.camera.position.x,
-      model.position.y,
-      this.camera.position.z,
-    );
-    model.lookAt(lookTarget);
-    model.rotateY(Math.PI);
+    model.lookAt(this.camera.position.x, model.position.y, this.camera.position.z);
 
     const now = performance.now();
     if (now - this.botLastShotTime > BOT_FIRE_INTERVAL_MS) {
