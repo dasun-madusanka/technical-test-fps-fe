@@ -210,11 +210,11 @@ export class ArenaGame {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.25;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0b1220);
-    this.scene.fog = new THREE.Fog(0x0b1220, 20, 55);
+    this.scene.background = new THREE.Color(0x8fd0f0); // bright day sky
+    this.scene.fog = new THREE.Fog(0x9fdcff, 35, 90);
 
     this.camera = new THREE.PerspectiveCamera(
       78,
@@ -269,11 +269,14 @@ export class ArenaGame {
     });
 
     try {
-  await this.loadEnvironmentProps();
-} catch (err) {
-  console.error("Environment props failed to load — check public/environment/ file names:", err);
-}
-this.spawnBot(botBase, rifleBase);
+      await this.loadEnvironmentProps();
+    } catch (err) {
+      console.error(
+        "Environment props failed to load — check public/environment/ file names:",
+        err,
+      );
+    }
+    this.spawnBot(botBase, rifleBase);
   }
 
   private zombieBaseCache: Awaited<
@@ -404,7 +407,7 @@ this.spawnBot(botBase, rifleBase);
   private buildStaticArena() {
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2, ARENA_HALF_SIZE * 2),
-      new THREE.MeshStandardMaterial({ color: 0x1a1f28, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0x5c8a4a, roughness: 0.9 }) // grassy daytime ground, was 0x1a1f28
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
@@ -412,23 +415,23 @@ this.spawnBot(botBase, rifleBase);
   }
 
   private setupLights() {
-    this.scene.add(new THREE.HemisphereLight(0x8899aa, 0x111318, 0.7));
+  this.scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x4a6b3a, 1.1)); // sky/ground bounce, was 0.7
 
-    const sun = new THREE.DirectionalLight(0xfff3e0, 1.15);
-    sun.position.set(15, 22, 10);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -ARENA_HALF_SIZE - 5;
-    sun.shadow.camera.right = ARENA_HALF_SIZE + 5;
-    sun.shadow.camera.top = ARENA_HALF_SIZE + 5;
-    sun.shadow.camera.bottom = -ARENA_HALF_SIZE - 5;
-    sun.shadow.camera.far = 60;
-    this.scene.add(sun);
+  const sun = new THREE.DirectionalLight(0xfff6e0, 1.9);   // was 1.15
+  sun.position.set(20, 30, 12);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -ARENA_HALF_SIZE - 5;
+  sun.shadow.camera.right = ARENA_HALF_SIZE + 5;
+  sun.shadow.camera.top = ARENA_HALF_SIZE + 5;
+  sun.shadow.camera.bottom = -ARENA_HALF_SIZE - 5;
+  sun.shadow.camera.far = 80;
+  sun.shadow.bias = -0.0015;
+  this.scene.add(sun);
 
-    const fill = new THREE.PointLight(0x22d3ee, 0.6, 40);
-    fill.position.set(0, 6, 0);
-    this.scene.add(fill);
-  }
+  const fill = new THREE.AmbientLight(0xffffff, 0.35);     // soft daylight fill, replaces the cyan point light
+  this.scene.add(fill);
+}
 
   private spawnBot(base: LoadedCharacter, weaponBase: THREE.Group) {
     this.botCharacterCache = base;
@@ -823,7 +826,7 @@ this.spawnBot(botBase, rifleBase);
       Math.sin(this.yaw + Math.PI / 2),
       0,
       Math.cos(this.yaw + Math.PI / 2),
-    ).negate();
+    );
 
     this.velocity.set(0, 0, 0);
     if (this.keys[this.settings.keyForward]) this.velocity.add(forward);
@@ -882,11 +885,13 @@ this.spawnBot(botBase, rifleBase);
       gameAssets.playAction(this.bot, "Idle_Gun", 0.2);
     }
 
-    model.lookAt(
+    const lookTarget = new THREE.Vector3(
       this.camera.position.x,
       model.position.y,
       this.camera.position.z,
     );
+    model.lookAt(lookTarget);
+    model.rotateY(Math.PI);
 
     const now = performance.now();
     if (now - this.botLastShotTime > BOT_FIRE_INTERVAL_MS) {

@@ -179,8 +179,13 @@ export class MultiplayerArena {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x05060a);
-    this.scene.fog = new THREE.Fog(0x05060a, 20, 55);
+    this.scene.background = new THREE.Color(0x8fd0f0);
+    this.scene.fog = new THREE.Fog(0x9fdcff, 35, 90);
+    this.renderer.shadowMap.enabled = true; // wasn't enabled at all before
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.25;
 
     this.camera = new THREE.PerspectiveCamera(
       78,
@@ -468,7 +473,7 @@ export class MultiplayerArena {
       }
 
       remote.targetPos.set(p.x, 0, p.z); // character root sits on the ground, ignore the server's eye-height y
-      remote.character.model.rotation.y = p.yaw;
+      remote.character.model.rotation.y = p.yaw + Math.PI;
 
       // detect a weapon switch
       if (p.weaponKey && p.weaponKey !== remote.currentWeaponKey) {
@@ -561,11 +566,12 @@ export class MultiplayerArena {
     muzzleFlash.position.set(0, 0.05, -0.6);
     weaponModel.add(muzzleFlash);
 
-const group = new THREE.Group();
-group.add(character.model);
-const box = new THREE.Box3().setFromObject(character.model);
-character.model.position.y -= box.min.y; // correct once, relative to the group
-this.scene.add(group);
+    const group = new THREE.Group();
+    group.add(character.model);
+    const box = new THREE.Box3().setFromObject(character.model);
+    character.model.position.y -= box.min.y; // correct once, relative to the group
+    character.model.rotation.y = Math.PI;
+    this.scene.add(group);
     gameAssets.playAction(character, "Idle_Gun", 0.1);
 
     this.remotePlayers.set(id, {
@@ -605,52 +611,31 @@ this.scene.add(group);
   private buildArena() {
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2, ARENA_HALF_SIZE * 2),
-      new THREE.MeshStandardMaterial({ color: 0x111827 }),
+      new THREE.MeshStandardMaterial({ color: 0x5c8a4a, roughness: 0.9 }),
     );
     floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
     this.scene.add(floor);
-    this.scene.add(
-      new THREE.GridHelper(ARENA_HALF_SIZE * 2, 30, 0x22d3ee, 0x1e293b),
-    );
-
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x0f172a });
-    const wallHeight = 5;
-    const wallThickness = 0.5;
-    const positions: [number, number, number, number, number][] = [
-      [0, wallHeight / 2, -ARENA_HALF_SIZE, ARENA_HALF_SIZE * 2, wallThickness],
-      [0, wallHeight / 2, ARENA_HALF_SIZE, ARENA_HALF_SIZE * 2, wallThickness],
-      [-ARENA_HALF_SIZE, wallHeight / 2, 0, wallThickness, ARENA_HALF_SIZE * 2],
-      [ARENA_HALF_SIZE, wallHeight / 2, 0, wallThickness, ARENA_HALF_SIZE * 2],
-    ];
-    for (const [x, y, z, w, d] of positions) {
-      const wall = new THREE.Mesh(
-        new THREE.BoxGeometry(w, wallHeight, d),
-        wallMat,
-      );
-      wall.position.set(x, y, z);
-      this.scene.add(wall);
-    }
-
-    // const coverMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
-    // const coverPositions: [number, number][] = [
-    //   [4, 4],
-    //   [-5, -3],
-    //   [6, -6],
-    //   [-6, 5],
-    //   [0, -8],
-    // ];
-    // for (const [x, z] of coverPositions) {
-    //   const box = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2, 1.6), coverMat);
-    //   box.position.set(x, 1, z);
-    //   this.scene.add(box);
-    // }
+    // NOTE: removed the neon GridHelper + flat box walls — the perimeter
+    // containers loaded in loadEnvironmentProps() now form the boundary,
+    // matching ArenaGame's look instead of a debug grid.
   }
 
   private setupLights() {
-    this.scene.add(new THREE.AmbientLight(0x8899aa, 0.65));
-    const point = new THREE.PointLight(0x22d3ee, 1.4, 60);
-    point.position.set(0, 8, 0);
-    this.scene.add(point);
+    this.scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x4a6b3a, 1.1));
+
+    const sun = new THREE.DirectionalLight(0xfff6e0, 1.9);
+    sun.position.set(20, 30, 12);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -ARENA_HALF_SIZE - 5;
+    sun.shadow.camera.right = ARENA_HALF_SIZE + 5;
+    sun.shadow.camera.top = ARENA_HALF_SIZE + 5;
+    sun.shadow.camera.bottom = -ARENA_HALF_SIZE - 5;
+    sun.shadow.camera.far = 80;
+    this.scene.add(sun);
+
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.35));
   }
 
   private handleKeyDown = (e: KeyboardEvent) => {
@@ -807,7 +792,7 @@ this.scene.add(group);
       Math.sin(this.yaw + Math.PI / 2),
       0,
       Math.cos(this.yaw + Math.PI / 2),
-    ).negate();
+    );
 
     this.velocity.set(0, 0, 0);
     if (this.keys[this.settings.keyForward]) this.velocity.add(forward);
