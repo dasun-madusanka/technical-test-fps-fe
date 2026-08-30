@@ -137,6 +137,7 @@ export class MultiplayerArena {
 
   private remotePlayers = new Map<string, RemotePlayer>();
   private obstacles: THREE.Object3D[] = [];
+  private hitFlashEl: HTMLDivElement | null = null;
 
   private state: MultiplayerState = {
     connectionStatus: "connecting",
@@ -367,9 +368,22 @@ export class MultiplayerArena {
     this.socket.on(
       "player:damaged",
       (data: { targetId: string; health: number }) => {
-        if (data.targetId === this.myUserId)
+        if (data.targetId === this.myUserId) {
           this.updateState({ myHealth: data.health });
-        else this.updateState({ opponentHealth: data.health });
+          this.triggerLocalHitFlash("taken");
+        } else {
+          this.updateState({ opponentHealth: data.health });
+          const remote = this.remotePlayers.get(data.targetId);
+          if (remote && data.health > 0) {
+            gameAssets.playAction(remote.character, "HitReact", 0.08, true);
+            setTimeout(() => {
+              if (remote.moving)
+                gameAssets.playAction(remote.character, "Run_Gun", 0.15);
+              else gameAssets.playAction(remote.character, "Idle_Gun", 0.15);
+            }, 350);
+          }
+          this.triggerLocalHitFlash("landed"); // confirms YOUR shot connected
+        }
       },
     );
 
@@ -437,6 +451,24 @@ export class MultiplayerArena {
     this.socket.on("disconnect", () =>
       this.updateState({ connectionStatus: "disconnected" }),
     );
+  }
+
+  private triggerLocalHitFlash(kind: "landed" | "taken") {
+    if (!this.hitFlashEl) {
+      const el = document.createElement("div");
+      el.style.cssText =
+        "position:fixed;inset:0;pointer-events:none;z-index:25;opacity:0;transition:opacity 60ms;";
+      this.canvas.parentElement?.appendChild(el);
+      this.hitFlashEl = el;
+    }
+    this.hitFlashEl.style.background =
+      kind === "landed"
+        ? "radial-gradient(circle, transparent 60%, rgba(255,0,0,0) 100%)"
+        : "radial-gradient(circle, transparent 40%, rgba(255,0,0,0.35) 100%)";
+    this.hitFlashEl.style.opacity = "1";
+    setTimeout(() => {
+      if (this.hitFlashEl) this.hitFlashEl.style.opacity = "0";
+    }, 100);
   }
 
   private applyStateUpdate(
@@ -888,6 +920,7 @@ export class MultiplayerArena {
     document.removeEventListener("keydown", this.handleKeyDown);
     document.removeEventListener("keyup", this.handleKeyUp);
     this.socket.removeAllListeners();
+    this.hitFlashEl?.remove();
     this.renderer.dispose();
   }
 }

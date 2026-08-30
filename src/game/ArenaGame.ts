@@ -173,6 +173,7 @@ export class ArenaGame {
 
   private state: ArenaState;
   private onState: StateListener;
+  private hitFlashEl: HTMLDivElement | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -242,6 +243,21 @@ export class ArenaGame {
 
     this.ready = this.loadAssetsAndPopulate();
   }
+
+  private triggerLocalHitFlash() {
+  if (!this.hitFlashEl) {
+    const el = document.createElement("div");
+    el.style.cssText =
+      "position:fixed;inset:0;pointer-events:none;z-index:25;opacity:0;transition:opacity 60ms;" +
+      "background:radial-gradient(circle, transparent 40%, rgba(255,0,0,0.35) 100%);";
+    this.canvas.parentElement?.appendChild(el);
+    this.hitFlashEl = el;
+  }
+  this.hitFlashEl.style.opacity = "1";
+  setTimeout(() => {
+    if (this.hitFlashEl) this.hitFlashEl.style.opacity = "0";
+  }, 100);
+}
 
   // ---------- async asset loading ----------
 
@@ -745,6 +761,7 @@ export class ArenaGame {
   private damagePlayer(amount: number) {
     if (this.state.isPlayerDead || this.state.matchOver) return;
     this.state.playerHealth -= amount;
+    this.triggerLocalHitFlash();
     if (this.state.playerHealth <= 0) {
       this.state.playerHealth = 0;
       this.state.isPlayerDead = true;
@@ -962,6 +979,7 @@ export class ArenaGame {
     document.removeEventListener("mousemove", this.handleMouseMove);
     document.removeEventListener("keydown", this.handleKeyDown);
     document.removeEventListener("keyup", this.handleKeyUp);
+    this.hitFlashEl?.remove();
     this.renderer.dispose();
   }
 }
