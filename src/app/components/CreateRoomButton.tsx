@@ -44,7 +44,7 @@ export default function CreateRoomButton() {
     <button
       onClick={handleCreate}
       disabled={loading}
-      className="px-8 py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition disabled:opacity-50"
+      className="xa-btn-secondary px-8 py-3 text-sm disabled:opacity-50"
     >
       {loading ? "CREATING..." : "PRIVATE LOBBY"}
     </button>

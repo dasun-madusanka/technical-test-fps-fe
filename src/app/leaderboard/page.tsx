@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import Navbar from "@/app/components/Navbar";
 
 interface LeaderboardPlayer {
   username: string;
@@ -31,65 +31,73 @@ export default function LeaderboardPage() {
   }, [period]);
 
   return (
-    <main className="min-h-screen bg-slate-950 px-6 py-12 flex flex-col items-center">
-      <div className="w-full max-w-2xl">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-3xl font-bold text-cyan-400">GLOBAL LEADERBOARD</h1>
-          <Link href="/" className="text-slate-500 text-sm hover:text-slate-300">← Home</Link>
-        </div>
+    <div className="min-h-screen bg-black">
+      <Navbar />
+      <main className="px-6 py-8 flex flex-col items-center">
+        <div className="w-full max-w-4xl">
+          <div className="flex gap-0 mb-6 text-sm font-bold">
+            {PERIODS.map((p, i) => (
+              <button
+                key={p.key}
+                onClick={() => setPeriod(p.key)}
+                className={`px-5 py-2 border border-[#1c1c20] transition ${i > 0 ? "-ml-px" : ""} ${
+                  period === p.key ? "bg-white text-black border-white" : "bg-black text-[#8a8a90] hover:text-white"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
 
-        <div className="flex gap-2 mb-6 font-mono text-sm">
-          {PERIODS.map((p) => (
-            <button
-              key={p.key}
-              onClick={() => setPeriod(p.key)}
-              className={`px-4 py-1.5 rounded-md transition ${
-                period === p.key
-                  ? "bg-cyan-500 text-slate-950 font-bold"
-                  : "bg-slate-800 text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        {loading ? (
-          <p className="text-slate-500 font-mono">Loading...</p>
-        ) : players.length === 0 ? (
-          <p className="text-slate-500 font-mono">
-            Get a kill to enter the leaderboard.
-          </p>
-        ) : (
-          <table className="w-full font-mono text-sm">
-            <thead>
-              <tr className="text-slate-500 text-left border-b border-slate-800">
-                <th className="py-2">#</th>
-                <th className="py-2">Player</th>
-                <th className="py-2 text-right">K</th>
-                <th className="py-2 text-right">D</th>
-                <th className="py-2 text-right">K/D</th>
-              </tr>
-            </thead>
-            <tbody>
+          {loading ? (
+            <p className="text-[#7a7a82] font-mono">Loading...</p>
+          ) : players.length === 0 ? (
+            <p className="text-[#7a7a82] font-mono">Get a kill to enter the leaderboard.</p>
+          ) : (
+            <div>
+              <div className="grid grid-cols-[60px_1fr_100px_100px_100px] text-[#7a7a82] text-xs uppercase tracking-wider px-2 pb-2 border-b border-[#1c1c20]">
+                <span>#</span>
+                <span>Player</span>
+                <span className="text-right">K</span>
+                <span className="text-right">D</span>
+                <span className="text-right">K/D</span>
+              </div>
               {players.map((p, i) => (
-                <tr key={p.username} className="border-b border-slate-900">
-                  <td className="py-2 text-slate-500">
-                    {i === 0 ? <span className="text-yellow-400">#1</span> :
-                     i === 1 ? <span className="text-slate-300">#2</span> :
-                     i === 2 ? <span className="text-orange-400">#3</span> :
-                     `#${i + 1}`}
-                  </td>
-                  <td className="py-2 text-slate-200">{p.username}</td>
-                  <td className="py-2 text-right text-cyan-400">{p.kills}</td>
-                  <td className="py-2 text-right text-slate-400">{p.deaths}</td>
-                  <td className="py-2 text-right text-slate-200">{p.kd.toFixed(2)}</td>
-                </tr>
+                <div
+                  key={p.username}
+                  className="grid grid-cols-[60px_1fr_100px_100px_100px] items-center px-2 py-3 border-b border-[#141416] font-mono text-sm"
+                >
+                  <span className={rankColor(i)}>#{i + 1}</span>
+                  <span className="flex items-center gap-3 text-[#e5e5e8]">
+                    <span className="w-6 h-6 rounded-full bg-[#1c1c20] flex items-center justify-center">
+                      <PersonIcon />
+                    </span>
+                    {p.username}
+                  </span>
+                  <span className="text-right text-white">{p.kills}</span>
+                  <span className="text-right text-[#8a8a90]">{p.deaths}</span>
+                  <span className="text-right text-[#e5e5e8]">{p.kd.toFixed(2)}</span>
+                </div>
               ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </main>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function rankColor(i: number) {
+  if (i === 0) return "text-yellow-400 font-bold";
+  if (i === 2) return "text-orange-400 font-bold";
+  return "text-[#7a7a82]";
+}
+
+function PersonIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8a8a90" strokeWidth="2">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21v-1a8 8 0 0 1 16 0v1" />
+    </svg>
   );
 }

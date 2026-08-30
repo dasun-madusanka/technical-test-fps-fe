@@ -22,12 +22,9 @@ export default function JoinRoomForm() {
         onChange={(e) => setCode(e.target.value)}
         placeholder="Enter room code"
         maxLength={5}
-        className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-sm font-mono outline-none focus:border-cyan-500 uppercase"
+        className="xa-input px-3 py-2 text-sm font-mono uppercase"
       />
-      <button
-        type="submit"
-        className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-bold transition"
-      >
+      <button type="submit" className="xa-btn-secondary px-4 py-2 text-sm">
         JOIN
       </button>
     </form>

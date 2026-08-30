@@ -32,13 +32,13 @@ export default function ArenaHUD({
         </div>
       </div>
 
-      <div className="absolute top-4 right-4 z-10 font-mono text-sm bg-black/50 border border-cyan-500/30 rounded-lg px-4 py-2 text-slate-200">
+      <div className="absolute top-4 right-4 z-10 font-mono text-sm bg-black/50 border border-white/30/30 rounded-lg px-4 py-2 text-slate-200">
         <div className="flex justify-between gap-6">
-          <span className="text-cyan-400">You</span>
+          <span className="text-white">You</span>
           <span>{state.playerKills}</span>
         </div>
         <div className="flex justify-between gap-6">
-          <span className="text-orange-400">Bot</span>
+          <span className="text-[#c9c9cf]">Bot</span>
           <span>{state.botKills}</span>
         </div>
       </div>
@@ -64,7 +64,7 @@ export default function ArenaHUD({
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80">
           <div
             className={`text-5xl font-bold mb-4 ${
-              state.playerWon ? "text-cyan-400" : "text-red-500"
+              state.playerWon ? "text-white" : "text-red-500"
             }`}
           >
             {state.playerWon ? "VICTORY" : "DEFEAT"}

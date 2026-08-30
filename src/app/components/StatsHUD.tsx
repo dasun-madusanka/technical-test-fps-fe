@@ -2,8 +2,8 @@ import { AimStats } from "@/game/AimTrainer";
 
 export default function StatsHUD({ stats }: { stats: AimStats }) {
   return (
-    <div className="absolute top-4 left-4 z-10 font-mono text-sm bg-black/50 backdrop-blur-sm border border-cyan-500/30 rounded-lg px-4 py-3 text-slate-200 space-y-1 min-w-[180px]">
-      <div className="text-cyan-400 font-bold mb-1 tracking-wider">
+    <div className="absolute top-4 left-4 z-10 font-mono text-sm bg-black/50 backdrop-blur-sm border border-white/30/30 rounded-lg px-4 py-3 text-slate-200 space-y-1 min-w-[180px]">
+      <div className="text-white font-bold mb-1 tracking-wider">
         AIM TRAINING
       </div>
       <div className="flex justify-between">
@@ -28,7 +28,7 @@ export default function StatsHUD({ stats }: { stats: AimStats }) {
       </div>
       <div className="flex justify-between border-t border-slate-700 pt-1 mt-1">
         <span className="text-slate-400">Score</span>
-        <span className="text-cyan-400 font-bold">{stats.score}</span>
+        <span className="text-white font-bold">{stats.score}</span>
       </div>
     </div>
   );

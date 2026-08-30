@@ -33,12 +33,9 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-slate-950 px-6">
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-xl p-8"
-      >
-        <h1 className="text-2xl font-bold text-cyan-400 mb-6 text-center">
-          LOG IN
+      <form onSubmit={handleSubmit} className="w-full max-w-sm xa-panel p-8">
+        <h1 className="text-2xl font-black text-white mb-6 text-center uppercase">
+          Log In
         </h1>
 
         {error && (
@@ -52,7 +49,7 @@ export default function LoginPage() {
             type="text"
             placeholder="Email or Username"
             required
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-cyan-500"
+            className="w-full xa-input px-3 py-2"
             value={form.identifier}
             onChange={(e) => setForm({ ...form, identifier: e.target.value })}
           />
@@ -60,7 +57,7 @@ export default function LoginPage() {
             type="password"
             placeholder="Password"
             required
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-cyan-500"
+            className="w-full xa-input px-3 py-2"
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
@@ -69,14 +66,14 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full mt-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition disabled:opacity-50"
+          className="xa-btn-primary w-full mt-6 py-2.5 disabled:opacity-50"
         >
           {loading ? "Logging in..." : "LOG IN"}
         </button>
 
-        <p className="text-slate-500 text-sm text-center mt-4">
+        <p className="text-[#7a7a82] text-sm text-center mt-4">
           Need an account?{" "}
-          <Link href="/register" className="text-cyan-400 hover:underline">
+          <Link href="/register" className="text-white hover:underline">
             Sign up
           </Link>
         </p>

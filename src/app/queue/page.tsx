@@ -107,7 +107,7 @@ export default function QueuePage() {
   }, [state.matchOver, state.won, state.myKills, state.myDeaths, state.weaponBreakdown]);
 
   return (
-    <main className="relative overflow-hidden bg-black" style={{ width: "100vw", height: "100vh" }}>
+    <main className="fixed inset-0 overflow-hidden bg-black">
       <canvas ref={canvasRef} className="block" style={{ width: "100%", height: "100%" }} />
 
       {state.connectionStatus === "matched" && !state.matchOver && (
@@ -134,13 +134,13 @@ export default function QueuePage() {
             </div>
           </div>
 
-          <div className="absolute top-4 right-4 z-10 font-mono text-sm bg-black/50 border border-cyan-500/30 rounded-lg px-4 py-2 text-slate-200">
+          <div className="absolute top-4 right-4 z-10 font-mono text-sm bg-black/50 border border-white/30/30 rounded-lg px-4 py-2 text-slate-200">
             <div className="flex justify-between gap-6">
-              <span className="text-cyan-400">You</span>
+              <span className="text-white">You</span>
               <span>{state.myKills}</span>
             </div>
             <div className="flex justify-between gap-6">
-              <span className="text-orange-400">{state.opponentUsername || "Opponent"}</span>
+              <span className="text-[#c9c9cf]">{state.opponentUsername || "Opponent"}</span>
               <span>{state.opponentKills}</span>
             </div>
           </div>
@@ -166,7 +166,7 @@ export default function QueuePage() {
 
       {state.matchOver && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80">
-          <div className={`text-5xl font-bold mb-4 ${state.won ? "text-cyan-400" : "text-red-500"}`}>
+          <div className={`text-5xl font-bold mb-4 ${state.won ? "text-white" : "text-red-500"}`}>
             {state.won ? "VICTORY" : "DEFEAT"}
           </div>
           <div className="text-3xl font-mono text-slate-200 mb-6">
@@ -184,7 +184,7 @@ export default function QueuePage() {
               disconnectGameSocket();
               router.push("/");
             }}
-            className="px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition"
+            className="px-6 py-2.5 rounded-lg bg-white text-black hover:bg-cyan-400 text-slate-950 font-bold transition"
           >
             RETURN HOME
           </button>
@@ -194,7 +194,7 @@ export default function QueuePage() {
       {(state.connectionStatus === "connecting" || state.connectionStatus === "queued") &&
         !state.matchOver && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 text-center px-6">
-            <h1 className="text-2xl font-bold text-cyan-400 mb-3">
+            <h1 className="text-2xl font-bold text-white mb-3">
               {state.connectionStatus === "connecting" ? "CONNECTING..." : "SEARCHING FOR OPPONENT..."}
             </h1>
             <p className="text-slate-500 font-mono text-sm">
@@ -206,7 +206,7 @@ export default function QueuePage() {
       {(error || state.connectionStatus === "error" || state.connectionStatus === "disconnected") && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 text-center px-6">
           <p className="text-red-400 font-mono mb-4">{error || "Connection to game server lost."}</p>
-          <Link href="/" className="text-cyan-400 hover:underline">
+          <Link href="/" className="text-white hover:underline">
             ← Back to home
           </Link>
         </div>

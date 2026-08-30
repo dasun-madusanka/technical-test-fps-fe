@@ -103,10 +103,7 @@ export default function ArenaPage() {
   };
 
   return (
-    <main
-      className="relative overflow-hidden bg-black"
-      style={{ width: "100vw", height: "100vh" }}
-    >
+    <main className="fixed inset-0 overflow-hidden bg-black">
       <canvas
         ref={canvasRef}
         className="block"

@@ -37,12 +37,12 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-950 px-6">
+    <main className="min-h-screen flex items-center justify-center bg-black px-6">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-xl p-8"
+        className="w-full max-w-sm xa-panel p-8"
       >
-        <h1 className="text-2xl font-bold text-cyan-400 mb-6 text-center">
+        <h1 className="text-2xl font-black text-white mb-6 text-center uppercase">
           CREATE ACCOUNT
         </h1>
 
@@ -57,7 +57,7 @@ export default function RegisterPage() {
             type="text"
             placeholder="Username"
             required
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-cyan-500"
+            className="w-full xa-input px-3 py-2"
             value={form.username}
             onChange={(e) => setForm({ ...form, username: e.target.value })}
           />
@@ -65,7 +65,7 @@ export default function RegisterPage() {
             type="email"
             placeholder="Email"
             required
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-cyan-500"
+            className="w-full xa-input px-3 py-2"
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
           />
@@ -73,7 +73,7 @@ export default function RegisterPage() {
             type="password"
             placeholder="Password"
             required
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-cyan-500"
+            className="w-full xa-input px-3 py-2"
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
@@ -81,7 +81,7 @@ export default function RegisterPage() {
             type="password"
             placeholder="Confirm Password"
             required
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-cyan-500"
+            className="w-full xa-input px-3 py-2"
             value={form.confirmPassword}
             onChange={(e) =>
               setForm({ ...form, confirmPassword: e.target.value })
@@ -92,14 +92,14 @@ export default function RegisterPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full mt-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition disabled:opacity-50"
+          className="xa-btn-primary w-full mt-6 py-2.5 disabled:opacity-50"
         >
           {loading ? "Creating..." : "CREATE ACCOUNT"}
         </button>
 
-        <p className="text-slate-500 text-sm text-center mt-4">
+        <p className="text-[#7a7a82] text-sm text-center mt-4">
           Already have an account?{" "}
-          <Link href="/login" className="text-cyan-400 hover:underline">
+          <Link href="/login" className="text-white hover:underline">
             Log in
           </Link>
         </p>

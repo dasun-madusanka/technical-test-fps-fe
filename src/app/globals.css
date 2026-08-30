@@ -1,11 +1,67 @@
 @import "tailwindcss";
 
+:root {
+  --bg: #08080a;
+  --panel: #101013;
+  --panel-2: #16161a;
+  --border: #26262b;
+  --border-soft: #1c1c20;
+  --accent: #ffffff;
+  --muted: #7a7a82;
+}
+
 html, body {
   height: 100%;
   margin: 0;
-  background: #0a0a0f;
+  background: var(--bg);
+  color: #f5f5f5;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Utility classes used across the app to match the reference UI */
+.xa-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.xa-btn-primary {
+  background: #ffffff;
+  color: #0a0a0a;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: background 0.15s ease;
+}
+.xa-btn-primary:hover { background: #d9d9d9; }
+.xa-btn-primary:disabled { background: #3a3a3f; color: #8a8a90; cursor: not-allowed; }
+
+.xa-btn-secondary {
+  background: #000000;
+  color: #f5f5f5;
+  border: 1px solid var(--border);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: background 0.15s ease;
+}
+.xa-btn-secondary:hover { background: #1a1a1d; }
+
+.xa-tab-active {
+  background: #ffffff;
+  color: #0a0a0a;
+}
+.xa-tab-inactive {
+  background: transparent;
+  color: #8a8a90;
+  border: 1px solid var(--border);
+}
+
+.xa-input {
+  background: #000000;
+  border: 1px solid var(--border);
   color: #f5f5f5;
 }
+.xa-input:focus { outline: none; border-color: #ffffff; }
 
 .crosshair {
   position: fixed;
@@ -20,7 +76,7 @@ html, body {
 .crosshair::before, .crosshair::after {
   content: "";
   position: absolute;
-  background: #22d3ee;
+  background: #ffffff;
 }
 .crosshair::before {
   left: 50%; top: 0; bottom: 0; width: 2px; transform: translateX(-50%);
@@ -28,3 +84,4 @@ html, body {
 .crosshair::after {
   top: 50%; left: 0; right: 0; height: 2px; transform: translateY(-50%);
 }
+main.fixed { touch-action: none; }
