@@ -16,6 +16,7 @@ import {
   createMuzzleFlashSprite,
   spawnTracer,
 } from "./assets/GameAssets";
+import { soundManager, weaponSound } from "./audio/SoundManager";
 
 interface RemotePlayer {
   character: CharacterInstance;
@@ -26,6 +27,7 @@ interface RemotePlayer {
   lastAmmo: number;
   lastHealth: number;
   moving: boolean;
+  lastY: number; 
 }
 
 export interface MultiplayerState {
@@ -198,6 +200,7 @@ export class MultiplayerArena {
 
     this.camera.add(this.weaponRig);
     this.scene.add(this.camera);
+    soundManager.attachListener(this.camera);
     this.muzzleFlash = createMuzzleFlashSprite();
     this.muzzleFlash.position.set(
       this.weaponRestPosition.x,
@@ -209,6 +212,7 @@ export class MultiplayerArena {
     this.assetsReady = Promise.all([
       this.loadLocalWeapons(),
       this.loadEnvironmentProps(),
+      soundManager.preloadAll(),
     ]).then(() => undefined);
 
     this.buildArena();
@@ -371,6 +375,7 @@ export class MultiplayerArena {
         if (data.targetId === this.myUserId) {
           this.updateState({ myHealth: data.health });
           this.triggerLocalHitFlash("taken");
+          soundManager.play2D("hit_taken", 0.7);
         } else {
           this.updateState({ opponentHealth: data.health });
           const remote = this.remotePlayers.get(data.targetId);
@@ -383,6 +388,7 @@ export class MultiplayerArena {
             }, 350);
           }
           this.triggerLocalHitFlash("landed"); // confirms YOUR shot connected
+          soundManager.play2D("hit_landed", 0.6);
         }
       },
     );
@@ -393,10 +399,13 @@ export class MultiplayerArena {
         if (data.targetId === this.myUserId) {
           this.pushKillFeed(`${data.byUsername ?? "Opponent"} eliminated you`);
           this.updateState({ isDead: true, myHealth: 0, respawnCountdown: 3 });
+          soundManager.play2D("death");   // <-- add
+          soundManager.stopLoop("local-footsteps");
           this.beginLocalRespawnCountdown();
         } else {
           this.pushKillFeed(`You eliminated ${this.state.opponentUsername}`);
           this.updateState({ opponentHealth: 0 });
+          soundManager.play2D("kill_confirm", 0.8);
         }
       },
     );
@@ -445,6 +454,7 @@ export class MultiplayerArena {
           myDeaths: me?.deaths ?? this.state.myDeaths,
           weaponBreakdown: me?.weapons ?? [],
         });
+        soundManager.play2D(me?.won ? "match_win" : "match_lose");
       },
     );
 
@@ -507,26 +517,51 @@ export class MultiplayerArena {
       remote.targetPos.set(p.x, 0, p.z); // character root sits on the ground, ignore the server's eye-height y
       remote.character.model.rotation.y = p.yaw + Math.PI;
 
+      if (p.y > remote.lastY + 0.05 && remote.lastY <= PLAYER_HEIGHT + 0.05) {
+        soundManager.playAt("jump", remote.character.model, 0.5, 8);
+      } else if (p.y <= PLAYER_HEIGHT + 0.01 && remote.lastY > PLAYER_HEIGHT + 0.05) {
+        soundManager.playAt("land", remote.character.model, 0.5, 8);
+      }
+      remote.lastY = p.y;
+
       // detect a weapon switch
       if (p.weaponKey && p.weaponKey !== remote.currentWeaponKey) {
         this.swapRemoteWeapon(remote, p.weaponKey);
+        soundManager.playAt("weapon_switch", remote.character.model, 0.4, 6);
       }
 
       // detect a shot: ammo went down since last update -> play fire feedback
       if (p.ammo < remote.lastAmmo) {
         this.triggerRemoteMuzzleFlash(remote);
+        soundManager.playAt(                                                    // <-- add
+          weaponSound(p.weaponKey ?? remote.currentWeaponKey, "fire"),
+          remote.weaponModel ?? remote.character.model,
+          0.9,
+          12,
+        );
+      }else if (p.ammo > remote.lastAmmo) {
+        // ammo went UP -> their reload just completed server-side
+        soundManager.playAt(                                                    // <-- add
+          weaponSound(remote.currentWeaponKey, "reload"),
+          remote.character.model,
+          0.6,
+          6,
+        );
       }
       remote.lastAmmo = p.ammo;
 
       // detect damage taken -> hit reaction
       if (p.health < remote.lastHealth && p.health > 0) {
         gameAssets.playAction(remote.character, "HitReact", 0.08, true);
+        soundManager.playAt("hit_taken", remote.character.model, 0.6, 8);
       }
       remote.lastHealth = p.health;
 
       // death
       if (!p.alive) {
         gameAssets.playAction(remote.character, "Death", 0.15, true);
+        soundManager.playAt("death", remote.character.model, 0.7, 10);          // <-- add
+        soundManager.stopLoop(`remote-footsteps-${p.id}`);
       }
 
       this.updateState({ opponentHealth: p.health, opponentKills: p.kills });
@@ -615,6 +650,7 @@ export class MultiplayerArena {
       lastAmmo: Infinity,
       lastHealth: 100,
       moving: false,
+      lastY: PLAYER_HEIGHT,
     });
   }
 
@@ -687,11 +723,13 @@ export class MultiplayerArena {
     if (!this.isGrounded || this.state.isDead) return;
     this.verticalVelocity = JUMP_SPEED;
     this.isGrounded = false;
+    soundManager.play2D("jump", 0.6);
   }
 
   private switchToSlot(slot: number) {
     if (slot === this.currentSlot || this.state.isDead || slot < 0 || slot > 2)
       return;
+    soundManager.play2D("weapon_switch", 0.5);
     this.lastSlot = this.currentSlot;
     this.currentSlot = slot;
     this.reloading = false;
@@ -738,6 +776,7 @@ export class MultiplayerArena {
     const fireIntervalMs = 60000 / this.weapon.fireRate;
     if (now - this.lastShotTime < fireIntervalMs) return;
     if (this.state.myAmmo <= 0) {
+      soundManager.play2D("dry_fire", 0.5);
       this.reload();
       return;
     }
@@ -750,6 +789,7 @@ export class MultiplayerArena {
     this.recoilRotation += 0.12;
     this.muzzleFlashTimer = 0.05;
     (this.muzzleFlash.material as THREE.SpriteMaterial).opacity = 1;
+    soundManager.play2D(weaponSound(this.weapon.key, "fire"));
 
     const muzzleWorld = new THREE.Vector3();
     this.muzzleFlash.getWorldPosition(muzzleWorld);
@@ -780,6 +820,7 @@ export class MultiplayerArena {
       return;
     this.reloading = true;
     this.updateState({ isReloading: true });
+    soundManager.play2D(weaponSound(this.weapon.key, "reload")); 
     this.socket.emit("player:reload");
 
     const slotAtReloadStart = this.currentSlot;
@@ -840,13 +881,18 @@ export class MultiplayerArena {
       next.z = Math.max(-bound, Math.min(bound, next.z));
       this.camera.position.x = next.x;
       this.camera.position.z = next.z;
+      if (this.isGrounded) soundManager.loopAt("local-footsteps", "footstep_run", null, 0.5);
+    }else {
+      soundManager.stopLoop("local-footsteps");
     }
+
 
     this.verticalVelocity += GRAVITY * delta;
     this.camera.position.y += this.verticalVelocity * delta;
     if (this.camera.position.y <= PLAYER_HEIGHT) {
       this.camera.position.y = PLAYER_HEIGHT;
       this.verticalVelocity = 0;
+      if (!this.isGrounded) soundManager.play2D("land", 0.5);
       this.isGrounded = true;
     }
   }
@@ -872,7 +918,7 @@ export class MultiplayerArena {
   }
 
   private interpolateRemotePlayers(delta: number) {
-    for (const remote of this.remotePlayers.values()) {
+    for (const [id, remote] of this.remotePlayers) {
       const before = remote.character.model.position.clone();
       remote.character.model.position.lerp(
         remote.targetPos,
@@ -886,6 +932,11 @@ export class MultiplayerArena {
           moved ? "Run_Gun" : "Idle_Gun",
           0.2,
         );
+        if (moved) {
+          soundManager.loopAt(`remote-footsteps-${id}`, "footstep_run", remote.character.model, 0.6);   // <-- add
+        } else {
+          soundManager.stopLoop(`remote-footsteps-${id}`);   // <-- add
+        }
       }
       remote.character.mixer.update(delta);
     }
@@ -921,6 +972,7 @@ export class MultiplayerArena {
     document.removeEventListener("keyup", this.handleKeyUp);
     this.socket.removeAllListeners();
     this.hitFlashEl?.remove();
+    soundManager.stopAllLoops();
     this.renderer.dispose();
   }
 }

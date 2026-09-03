@@ -9,6 +9,7 @@ import {
   attachWeaponToCharacter,
   createMuzzleFlashSprite,
 } from "./assets/GameAssets";
+import { soundManager, weaponSound } from "./audio/SoundManager";
 
 export interface ArenaState {
   playerHealth: number;
@@ -227,6 +228,8 @@ export class ArenaGame {
     this.scene.add(this.camera);
     this.resetPlayerPosition();
 
+    soundManager.attachListener(this.camera);
+
     this.muzzleFlash = this.createMuzzleFlash();
     this.weaponRig.add(this.muzzleFlash);
 
@@ -263,11 +266,14 @@ export class ArenaGame {
 
   private async loadAssetsAndPopulate() {
     const botCharacterPath = pickCharacterPath("bot-" + Math.random());
+    const soundsPromise = soundManager.preloadAll();
     const [botBase, rifleBase, ...weaponBases] = await Promise.all([
       gameAssets.loadCharacter(botCharacterPath),
       gameAssets.loadProp(WEAPON_ASSET_BY_KEY.rifle),
       ...WEAPON_ASSET_BY_SLOT.map((path) => gameAssets.loadProp(path)),
     ]);
+
+    await soundsPromise;
 
     // weapon view-models, one per slot, attached to camera rig
     this.weaponModels = weaponBases.map((base, i) => {
@@ -508,6 +514,7 @@ export class ArenaGame {
     if (!this.isGrounded || this.state.isPlayerDead) return;
     this.verticalVelocity = JUMP_SPEED;
     this.isGrounded = false;
+    soundManager.play2D("jump", 0.6);
   }
 
   private handleMouseMove = (e: MouseEvent) => {
@@ -546,6 +553,8 @@ export class ArenaGame {
       slot > 2
     )
       return;
+    
+    soundManager.play2D("weapon_switch", 0.5);
     this.lastSlot = this.currentSlot;
     this.currentSlot = slot;
     this.reloading = false;
@@ -573,6 +582,7 @@ export class ArenaGame {
     const fireIntervalMs = 60000 / this.weapon.fireRate;
     if (now - this.lastShotTime < fireIntervalMs) return;
     if (this.state.playerAmmo <= 0) {
+      soundManager.play2D("dry_fire", 0.5);
       this.reload();
       return;
     }
@@ -583,6 +593,7 @@ export class ArenaGame {
 
     this.triggerRecoil();
     this.triggerMuzzleFlash();
+    soundManager.play2D(weaponSound(this.weapon.key, "fire"));
 
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
     const targets: THREE.Object3D[] =
@@ -597,6 +608,7 @@ export class ArenaGame {
       const root = this.resolveHitRoot(firstHit.object, targets);
       if (this.bot && root === this.bot.model) {
         this.damageBot(this.weapon.damage);
+        soundManager.play2D("hit_landed", 0.6);
       }
     } else {
       // no hit: shoot the tracer out into the distance along the aim direction
@@ -714,6 +726,7 @@ export class ArenaGame {
       return;
     this.reloading = true;
     this.state.isReloading = true;
+    soundManager.play2D(weaponSound(this.weapon.key, "reload"));
     this.emitState();
 
     const slotAtReloadStart = this.currentSlot;
@@ -739,6 +752,7 @@ export class ArenaGame {
       this.botAlive = false;
       this.botDying = true;
       gameAssets.playAction(this.bot, "Death", 0.15, true);
+      soundManager.playAt("death", this.bot.model, 0.8);
       this.state.playerKills += 1;
       this.weaponKills[this.currentSlot] += 1;
       this.pushKillFeed("You eliminated the zombie");
@@ -750,6 +764,7 @@ export class ArenaGame {
       setTimeout(() => this.respawnBot(), 2000);
     } else {
       gameAssets.playAction(this.bot, "HitReact", 0.08, true);
+      soundManager.playAt("hit_taken", this.bot.model, 0.7);
       setTimeout(() => {
         if (this.botAlive && this.bot) {
           gameAssets.playAction(this.bot, "Walk", 0.15);
@@ -762,12 +777,14 @@ export class ArenaGame {
     if (this.state.isPlayerDead || this.state.matchOver) return;
     this.state.playerHealth -= amount;
     this.triggerLocalHitFlash();
+    soundManager.play2D("hit_taken", 0.7);
     if (this.state.playerHealth <= 0) {
       this.state.playerHealth = 0;
       this.state.isPlayerDead = true;
       this.state.playerDeaths += 1;
       this.state.botKills += 1;
-      this.pushKillFeed("The zombie got you");
+      soundManager.play2D("death");
+      this.pushKillFeed("The bot got you");
 
       if (this.state.botKills >= SCORE_LIMIT) {
         this.endMatch(false);
@@ -782,6 +799,7 @@ export class ArenaGame {
     this.state.matchOver = true;
     this.state.playerWon = playerWon;
     this.running = false;
+    soundManager.play2D(playerWon ? "match_win" : "match_lose");
     this.emitState();
   }
 
@@ -811,6 +829,7 @@ export class ArenaGame {
     this.weaponModels.forEach((model, i) => {
       model.visible = i === 0;
     });
+    soundManager.play2D("respawn", 0.7);
     this.emitState();
   }
 
@@ -851,7 +870,7 @@ export class ArenaGame {
     if (this.keys[this.settings.keyRight]) this.velocity.add(right);
     if (this.keys[this.settings.keyLeft]) this.velocity.sub(right);
 
-    if (this.velocity.lengthSq() > 0) {
+    if (this.velocity.lengthSq() > 0 && this.isGrounded) {
       this.velocity.normalize().multiplyScalar(PLAYER_SPEED * delta);
       const next = this.camera.position.clone().add(this.velocity);
       const bound = ARENA_HALF_SIZE - 0.6;
@@ -859,6 +878,9 @@ export class ArenaGame {
       next.z = Math.max(-bound, Math.min(bound, next.z));
       this.camera.position.x = next.x;
       this.camera.position.z = next.z;
+      soundManager.loopAt("local-footsteps", "footstep_run", null, 0.5);
+    } else {
+      soundManager.stopLoop("local-footsteps");
     }
 
     this.verticalVelocity += GRAVITY * delta;
@@ -867,6 +889,7 @@ export class ArenaGame {
     if (this.camera.position.y <= GROUND_Y) {
       this.camera.position.y = GROUND_Y;
       this.verticalVelocity = 0;
+      if (!this.isGrounded) soundManager.play2D("land", 0.5);
       this.isGrounded = true;
     }
   }
@@ -898,8 +921,10 @@ export class ArenaGame {
       toTarget.normalize().multiplyScalar(BOT_SPEED * delta);
       model.position.add(toTarget);
       gameAssets.playAction(this.bot, "Run_Gun", 0.2);
+      soundManager.loopAt("bot-footsteps", "footstep_run", model, 0.7);
     } else {
       gameAssets.playAction(this.bot, "Idle_Gun", 0.2);
+      soundManager.stopLoop("bot-footsteps");
     }
 
     model.lookAt(this.camera.position.x, model.position.y, this.camera.position.z);
@@ -909,6 +934,7 @@ export class ArenaGame {
       this.botLastShotTime = now;
       if (this.hasLineOfSightToPlayer()) {
         this.triggerBotMuzzleFlash();
+        soundManager.playAt("fire_rifle", model, 0.9, 10);
         const distance = model.position.distanceTo(this.camera.position);
         const hitChance = Math.max(0.15, 0.75 - distance * 0.03);
         if (Math.random() < hitChance) this.damagePlayer(BOT_DAMAGE);
@@ -974,6 +1000,7 @@ export class ArenaGame {
     document.removeEventListener("keydown", this.handleKeyDown);
     document.removeEventListener("keyup", this.handleKeyUp);
     this.hitFlashEl?.remove();
+    soundManager.stopAllLoops();
     this.renderer.dispose();
   }
 }
