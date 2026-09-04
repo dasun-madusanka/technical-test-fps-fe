@@ -8,7 +8,19 @@ import {
   WEAPON_ASSET_BY_KEY,
   attachWeaponToCharacter,
   createMuzzleFlashSprite,
+  spawnBulletImpact,
+  updateBulletImpact,
+  BulletImpact,
 } from "./assets/GameAssets";
+import {
+  PROPS_LAYOUT,
+  STREET_TILES,
+  resolveMovementCollision,
+  getSafeSpawnPoint,
+  isSpawnPositionSafe,
+  BOUNDARY_LIMIT,
+  PLAYER_RADIUS,
+} from "./arena/ArenaLayout";
 import { soundManager, weaponSound } from "./audio/SoundManager";
 
 export interface ArenaState {
@@ -156,6 +168,8 @@ export class ArenaGame {
   private muzzleFlash: THREE.Sprite;
   private muzzleFlashTimer = 0;
   private tracers: { mesh: THREE.Mesh; life: number }[] = [];
+  private bulletImpacts: BulletImpact[] = [];
+  private boundaryWalls: THREE.Mesh[] = [];
 
   private get weapon(): WeaponConfig {
     return this.inventory[this.currentSlot];
@@ -322,95 +336,46 @@ export class ArenaGame {
   private botCharacterCache: LoadedCharacter | null = null;
 
   private async loadEnvironmentProps() {
-    const [
-      containerRed,
-      containerGreen,
-      barrel,
-      trafficCone,
-      trafficBarrier,
-      cinderBlock,
-      pallet,
-      chest,
-      trashBag,
-      streetLights,
-      waterTower,
-    ] = await Promise.all([
-      gameAssets.loadProp(ASSET_PATHS.containerRed),
-      gameAssets.loadProp(ASSET_PATHS.containerGreen),
-      gameAssets.loadProp(ASSET_PATHS.barrel),
-      gameAssets.loadProp(ASSET_PATHS.trafficCone),
-      gameAssets.loadProp(ASSET_PATHS.trafficBarrier),
-      gameAssets.loadProp(ASSET_PATHS.cinderBlock),
-      gameAssets.loadProp(ASSET_PATHS.pallet),
-      gameAssets.loadProp(ASSET_PATHS.chest),
-      gameAssets.loadProp(ASSET_PATHS.trashBag),
-      gameAssets.loadProp(ASSET_PATHS.streetLights),
-      gameAssets.loadProp(ASSET_PATHS.waterTower),
-    ]);
+    const uniqueKeys = Array.from(
+      new Set([
+        ...STREET_TILES.map((t) => t.assetKey),
+        ...PROPS_LAYOUT.map((p) => p.assetKey),
+      ]),
+    ) as (keyof typeof ASSET_PATHS)[];
 
-    // perimeter "walls" made of stacked containers, alternating red/green
-    const perimeterSpots: [number, number, number][] = [
-      [-ARENA_HALF_SIZE + 1, 0, -ARENA_HALF_SIZE + 1],
-      [ARENA_HALF_SIZE - 1, 0, -ARENA_HALF_SIZE + 1],
-      [-ARENA_HALF_SIZE + 1, 0, ARENA_HALF_SIZE - 1],
-      [ARENA_HALF_SIZE - 1, 0, ARENA_HALF_SIZE - 1],
-      [0, 0, -ARENA_HALF_SIZE + 1],
-      [0, 0, ARENA_HALF_SIZE - 1],
-      [-ARENA_HALF_SIZE + 1, 0, 0],
-      [ARENA_HALF_SIZE - 1, 0, 0],
-    ];
-    perimeterSpots.forEach(([x, y, z], i) => {
-      const base = i % 2 === 0 ? containerRed : containerGreen;
-      const container = gameAssets.spawnProp(base);
-      container.position.set(x, y, z);
-      container.rotation.y = Math.random() * Math.PI * 2;
-      this.scene.add(container);
-    });
+    const loadedBases = await Promise.all(
+      uniqueKeys.map(async (key) => {
+        const path = ASSET_PATHS[key];
+        const base = await gameAssets.loadProp(path);
+        return [key, base] as const;
+      }),
+    );
+    const baseMap = new Map<string, THREE.Group>(loadedBases);
 
-    // cover props players and the zombie can hide behind / collide with
-    const coverSpots: [THREE.Group, number, number, number][] = [
-      [barrel, 4, 0, 4],
-      [cinderBlock, -5, 0, -3],
-      [pallet, 6, 0, -6],
-      [chest, -6, 0, 5],
-      [trafficBarrier, 0, 0, -8],
-      [barrel, -3, 0, 7],
-      [cinderBlock, 3, 0, -3],
-    ];
-    for (const [base, x, y, z] of coverSpots) {
-      const prop = gameAssets.spawnProp(base);
-      prop.position.set(x, y, z);
-      prop.rotation.y = Math.random() * Math.PI * 2;
-      this.scene.add(prop);
-      this.obstacles.push(prop);
+    // Spawn modular street tiles on ground
+    for (const tile of STREET_TILES) {
+      const base = baseMap.get(tile.assetKey);
+      if (!base) continue;
+      const mesh = gameAssets.spawnProp(base);
+      mesh.position.set(tile.x, tile.y, tile.z);
+      mesh.rotation.y = tile.rotationY;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
     }
 
-    // decorative-only clutter (not collidable) for atmosphere
-    const clutterSpots: [THREE.Group, number, number, number][] = [
-      [trafficCone, 2, 0, 6],
-      [trafficCone, -2, 0, -6],
-      [trashBag, -8, 0, -8],
-      [trashBag, 8, 0, 8],
-    ];
-    for (const [base, x, y, z] of clutterSpots) {
-      const prop = gameAssets.spawnProp(base);
-      prop.position.set(x, y, z);
-      this.scene.add(prop);
-    }
+    // Spawn tactical environment props
+    for (const prop of PROPS_LAYOUT) {
+      const base = baseMap.get(prop.assetKey);
+      if (!base) continue;
+      const model = gameAssets.spawnProp(base);
+      model.position.set(prop.x, prop.y, prop.z);
+      model.rotation.y = prop.rotationY;
+      if (prop.scale) model.scale.setScalar(prop.scale);
+      this.scene.add(model);
 
-    // tall background landmarks
-    const waterTowerProp = gameAssets.spawnProp(waterTower);
-    waterTowerProp.position.set(ARENA_HALF_SIZE + 4, 0, ARENA_HALF_SIZE + 4);
-    this.scene.add(waterTowerProp);
-
-    const lightPositions: [number, number][] = [
-      [-ARENA_HALF_SIZE + 2, -ARENA_HALF_SIZE + 2],
-      [ARENA_HALF_SIZE - 2, ARENA_HALF_SIZE - 2],
-    ];
-    for (const [x, z] of lightPositions) {
-      const lamp = gameAssets.spawnProp(streetLights);
-      lamp.position.set(x, 0, z);
-      this.scene.add(lamp);
+      if (prop.collider) {
+        this.obstacles.push(model);
+      }
     }
   }
 
@@ -433,8 +398,9 @@ export class ArenaGame {
   }
 
   private resetPlayerPosition() {
-    this.camera.position.set(0, PLAYER_HEIGHT, 10);
-    this.yaw = Math.PI;
+    const spawn = getSafeSpawnPoint();
+    this.camera.position.set(spawn.x, GROUND_Y, spawn.z);
+    this.yaw = spawn.yaw;
     this.pitch = 0;
     this.verticalVelocity = 0;
     this.isGrounded = true;
@@ -443,18 +409,49 @@ export class ArenaGame {
 
   private buildStaticArena() {
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2, ARENA_HALF_SIZE * 2),
-      new THREE.MeshStandardMaterial({ color: 0x5c8a4a, roughness: 0.9 }), // grassy daytime ground, was 0x1a1f28
+      new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2 + 10, ARENA_HALF_SIZE * 2 + 10),
+      new THREE.MeshStandardMaterial({ color: 0x24282b, roughness: 0.95 }),
     );
     floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.01;
     floor.receiveShadow = true;
     this.scene.add(floor);
+
+    // Enclosing perimeter walls
+    const WALL_HEIGHT = 4.5;
+    const WALL_THICKNESS = 1.2;
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: 0x30343a,
+      roughness: 0.85,
+      metalness: 0.2,
+    });
+    const span = ARENA_HALF_SIZE * 2 + WALL_THICKNESS;
+
+    const northSouth = new THREE.BoxGeometry(span, WALL_HEIGHT, WALL_THICKNESS);
+    const eastWest = new THREE.BoxGeometry(WALL_THICKNESS, WALL_HEIGHT, span);
+
+    const north = new THREE.Mesh(northSouth, wallMaterial);
+    north.position.set(0, WALL_HEIGHT / 2, -ARENA_HALF_SIZE - WALL_THICKNESS / 2);
+    const south = new THREE.Mesh(northSouth, wallMaterial);
+    south.position.set(0, WALL_HEIGHT / 2, ARENA_HALF_SIZE + WALL_THICKNESS / 2);
+    const east = new THREE.Mesh(eastWest, wallMaterial);
+    east.position.set(ARENA_HALF_SIZE + WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
+    const west = new THREE.Mesh(eastWest, wallMaterial);
+    west.position.set(-ARENA_HALF_SIZE - WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
+
+    this.boundaryWalls = [north, south, east, west];
+    for (const wall of this.boundaryWalls) {
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      this.scene.add(wall);
+      this.obstacles.push(wall);
+    }
   }
 
   private setupLights() {
-    this.scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x4a6b3a, 1.1)); // sky/ground bounce, was 0.7
+    this.scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x4a6b3a, 1.1));
 
-    const sun = new THREE.DirectionalLight(0xfff6e0, 1.9); // was 1.15
+    const sun = new THREE.DirectionalLight(0xfff6e0, 1.9);
     sun.position.set(20, 30, 12);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -466,7 +463,7 @@ export class ArenaGame {
     sun.shadow.bias = -0.0015;
     this.scene.add(sun);
 
-    const fill = new THREE.AmbientLight(0xffffff, 0.35); // soft daylight fill, replaces the cyan point light
+    const fill = new THREE.AmbientLight(0xffffff, 0.35);
     this.scene.add(fill);
   }
 
@@ -474,7 +471,11 @@ export class ArenaGame {
     this.botCharacterCache = base;
     const instance = gameAssets.spawnCharacter(base);
     instance.model.scale.setScalar(BOT_SCALE);
-    instance.model.position.set(0, 0, -10);
+
+    const botSpawn = getSafeSpawnPoint({ x: this.camera.position.x, z: this.camera.position.z });
+    instance.model.position.set(botSpawn.x, 0, botSpawn.z);
+    instance.model.rotation.y = botSpawn.yaw;
+
     instance.model.traverse((o) => {
       o.userData.isBotPart = true;
     });
@@ -483,7 +484,7 @@ export class ArenaGame {
     attachWeaponToCharacter(instance, weaponModel, "rifle");
 
     const flash = createMuzzleFlashSprite();
-    flash.position.set(0, 0.05, -0.6); // relative to the Rifle socket
+    flash.position.set(0, 0.05, -0.6);
     weaponModel.add(flash);
     instance.model.userData.muzzleFlash = flash;
 
@@ -642,6 +643,14 @@ export class ArenaGame {
       if (this.bot && root === this.bot.model) {
         this.damageBot(this.weapon.damage);
         soundManager.play2D("hit_landed", 0.6);
+      } else {
+        const impact = spawnBulletImpact(
+          this.scene,
+          firstHit.point,
+          firstHit.face?.normal,
+        );
+        this.bulletImpacts.push(impact);
+        soundManager.playAt("hit_taken", firstHit.object, 0.65);
       }
     } else {
       // no hit: shoot the tracer out into the distance along the aim direction
@@ -752,6 +761,17 @@ export class ArenaGame {
         this.tracers.splice(i, 1);
       }
     }
+
+    for (let i = this.bulletImpacts.length - 1; i >= 0; i--) {
+      const alive = updateBulletImpact(
+        this.bulletImpacts[i],
+        delta,
+        this.scene,
+      );
+      if (!alive) {
+        this.bulletImpacts.splice(i, 1);
+      }
+    }
   }
 
   private reload() {
@@ -784,6 +804,8 @@ export class ArenaGame {
     if (this.botHealth <= 0) {
       this.botAlive = false;
       this.botDying = true;
+      const attached = this.bot.model.userData.attachedWeapon as THREE.Object3D | undefined;
+      if (attached) attached.visible = false;
       gameAssets.playAction(this.bot, "die", 0.15, true);
       soundManager.playAt("death", this.bot.model, 0.8);
       this.state.playerKills += 1;
@@ -906,7 +928,8 @@ export class ArenaGame {
     if (this.velocity.lengthSq() > 0 && this.isGrounded) {
       this.velocity.normalize().multiplyScalar(PLAYER_SPEED * delta);
       const next = this.camera.position.clone().add(this.velocity);
-      const bound = ARENA_HALF_SIZE - 0.6;
+      resolveMovementCollision(next, PLAYER_RADIUS, 3);
+      const bound = BOUNDARY_LIMIT;
       next.x = Math.max(-bound, Math.min(bound, next.x));
       next.z = Math.max(-bound, Math.min(bound, next.z));
       this.camera.position.x = next.x;
@@ -953,6 +976,9 @@ export class ArenaGame {
     if (moving) {
       toTarget.normalize().multiplyScalar(BOT_SPEED * delta);
       model.position.add(toTarget);
+      resolveMovementCollision(model.position, PLAYER_RADIUS, 2);
+      model.position.x = Math.max(-BOUNDARY_LIMIT, Math.min(BOUNDARY_LIMIT, model.position.x));
+      model.position.z = Math.max(-BOUNDARY_LIMIT, Math.min(BOUNDARY_LIMIT, model.position.z));
       gameAssets.playAction(this.bot, "sprint", 0.2);
       soundManager.loopAt("bot-footsteps", "footstep_run", model, 0.7);
     } else {
@@ -1020,7 +1046,6 @@ export class ArenaGame {
 
   private loop = () => {
     if (!this.running) return;
-    console.log("frame"); 
     this.animationId = requestAnimationFrame(this.loop);
     const delta = Math.min(this.clock.getDelta(), 0.1);
 
@@ -1048,6 +1073,16 @@ export class ArenaGame {
       this.handlePointerLockError,
     );
     this.hitFlashEl?.remove();
+    for (const impact of this.bulletImpacts) {
+      const data = impact.group.userData;
+      if (data) {
+        data.sparkGeo?.dispose();
+        data.sparkMat?.dispose();
+        data.flashMat?.dispose();
+      }
+      this.scene.remove(impact.group);
+    }
+    this.bulletImpacts = [];
     soundManager.stopAllLoops();
     this.renderer.dispose();
   }

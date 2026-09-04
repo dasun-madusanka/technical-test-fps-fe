@@ -62,8 +62,40 @@ class GameAssetsLoader {
     return SkeletonUtils.clone(base) as THREE.Object3D;
   }
 
+  /** Plays the dedicated death animation cleanly, stopping all other tracks and clamping the pose on the ground. */
+  playDeath(instance: CharacterInstance) {
+    instance.mixer.stopAllAction();
+    const dieAction = instance.actions["die"];
+    if (dieAction) {
+      dieAction.reset();
+      dieAction.setLoop(THREE.LoopOnce, 1);
+      dieAction.clampWhenFinished = true;
+      dieAction.play();
+      instance.currentAction = "die";
+    }
+  }
+
+  /** Cleans up death pose and transitions cleanly back to standing/holding action on respawn. */
+  resetCharacterAfterDeath(instance: CharacterInstance, defaultAction = "holding-right") {
+    instance.mixer.stopAllAction();
+    const action = instance.actions[defaultAction];
+    if (action) {
+      action.reset();
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.clampWhenFinished = false;
+      action.play();
+      instance.currentAction = defaultAction;
+    }
+  }
+
   /** Cross-fades to a new animation by name. No-op if already playing it or clip missing. */
   playAction(instance: CharacterInstance, name: string, fadeTime = 0.2, loopOnce = false) {
+    // If currently playing death animation, do NOT allow regular animations to interrupt it
+    if (instance.currentAction === "die" && name !== "die") return;
+    if (name === "die") {
+      this.playDeath(instance);
+      return;
+    }
     if (instance.currentAction === name) return;
     const next = instance.actions[name];
     if (!next) return;
@@ -88,21 +120,48 @@ export const ASSET_PATHS = {
   characterShaun: "/models/CharactersBlocky/character-d.glb",
   rifleWeapon: "/models/WeaponsBlocky/blasterA.glb",
   pistolWeapon: "/models/WeaponsBlocky/blasterF.glb",
-  // NOTE: Blaster Kit has no melee/knife model - this still points at the
-  // OLD knife mesh until you source a blocky knife. See chat notes.
   knifeWeapon: "/models/WeaponsBlocky/blasterC.glb",
+
+  // Environment Structures & Props
   containerRed: "/models/Environment/glTF/Container_Red.gltf",
   containerGreen: "/models/Environment/glTF/Container_Green.gltf",
+  waterTower: "/models/Environment/glTF/WaterTower.gltf",
+  townSign: "/models/Environment/glTF/TownSign.gltf",
   barrel: "/models/Environment/glTF/Barrel.gltf",
-  trafficCone: "/models/Environment/glTF/TrafficCone_1.gltf",
+  trafficBarrier1: "/models/Environment/glTF/TrafficBarrier_1.gltf",
+  trafficBarrier2: "/models/Environment/glTF/TrafficBarrier_2.gltf",
   trafficBarrier: "/models/Environment/glTF/TrafficBarrier_1.gltf",
+  plasticBarrier: "/models/Environment/glTF/PlasticBarrier.gltf",
+  trafficCone: "/models/Environment/glTF/TrafficCone_1.gltf",
   cinderBlock: "/models/Environment/glTF/CinderBlock.gltf",
   pallet: "/models/Environment/glTF/Pallet.gltf",
+  palletBroken: "/models/Environment/glTF/Pallet_Broken.gltf",
   chest: "/models/Environment/glTF/Chest.gltf",
+  chestSpecial: "/models/Environment/glTF/Chest_Special.gltf",
+  couch: "/models/Environment/glTF/Couch.gltf",
+  pipes: "/models/Environment/glTF/Pipes.gltf",
   trashBag: "/models/Environment/glTF/TrashBag_1.gltf",
   streetLights: "/models/Environment/glTF/StreetLights.gltf",
-  waterTower: "/models/Environment/glTF/WaterTower.gltf",
-  
+  trafficLight: "/models/Environment/glTF/TrafficLight_1.gltf",
+  fireHydrant: "/models/Environment/glTF/FireHydrant.gltf",
+  wheelStack: "/models/Environment/glTF/Wheels_Stack.gltf",
+  blood1: "/models/Environment/glTF/Blood_1.gltf",
+  blood2: "/models/Environment/glTF/Blood_2.gltf",
+  blood3: "/models/Environment/glTF/Blood_3.gltf",
+
+  // Modular Streets
+  street4Way: "/models/Environment/glTF/Street_4Way.gltf",
+  streetStraight: "/models/Environment/glTF/Street_Straight.gltf",
+  streetTurn: "/models/Environment/glTF/Street_Turn.gltf",
+  streetT: "/models/Environment/glTF/Street_T.gltf",
+  streetCrack1: "/models/Environment/glTF/Street_Straight_Crack1.gltf",
+  streetCrack2: "/models/Environment/glTF/Street_Straight_Crack2.gltf",
+
+  // Vehicles
+  vehicleTruck: "/models/Vehicles/glTF/Vehicle_Truck.gltf",
+  vehiclePickup: "/models/Vehicles/glTF/Vehicle_Pickup.gltf",
+  vehiclePickupArmored: "/models/Vehicles/glTF/Vehicle_Pickup_Armored.gltf",
+  vehicleSports: "/models/Vehicles/glTF/Vehicle_Sports.gltf",
 } as const;
 
 export const CHARACTER_ASSET_PATHS = [
@@ -194,3 +253,97 @@ export function spawnTracer(scene: THREE.Scene, from: THREE.Vector3, to: THREE.V
   scene.add(tracer);
   return { mesh: tracer, life: 0.08 };
 }
+
+export interface BulletImpact {
+  group: THREE.Group;
+  life: number;
+  maxLife: number;
+}
+
+export function spawnBulletImpact(
+  scene: THREE.Scene,
+  point: THREE.Vector3,
+  normal?: THREE.Vector3,
+): BulletImpact {
+  const group = new THREE.Group();
+  group.position.copy(point);
+
+  const sparkCount = 10;
+  const positions = new Float32Array(sparkCount * 3);
+  const velocities: THREE.Vector3[] = [];
+  const baseNorm = normal ? normal.clone().normalize() : new THREE.Vector3(0, 1, 0);
+
+  for (let i = 0; i < sparkCount; i++) {
+    positions[i * 3] = 0;
+    positions[i * 3 + 1] = 0;
+    positions[i * 3 + 2] = 0;
+    const spread = new THREE.Vector3(
+      (Math.random() - 0.5) * 1.5,
+      (Math.random() - 0.5) * 1.5,
+      (Math.random() - 0.5) * 1.5,
+    );
+    velocities.push(baseNorm.clone().multiplyScalar(2.0 + Math.random() * 2.5).add(spread));
+  }
+
+  const sparkGeo = new THREE.BufferGeometry();
+  sparkGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const sparkMat = new THREE.PointsMaterial({
+    color: 0xffe090,
+    size: 0.04,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const sparkPoints = new THREE.Points(sparkGeo, sparkMat);
+  group.add(sparkPoints);
+
+  const flashMat = new THREE.SpriteMaterial({
+    color: 0xffaa44,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const flashSprite = new THREE.Sprite(flashMat);
+  flashSprite.scale.set(0.3, 0.3, 0.3);
+  group.add(flashSprite);
+
+  scene.add(group);
+  group.userData = { velocities, sparkGeo, sparkMat, flashMat, flashSprite };
+
+  return { group, life: 0.15, maxLife: 0.15 };
+}
+
+export function updateBulletImpact(impact: BulletImpact, delta: number, scene: THREE.Scene): boolean {
+  impact.life -= delta;
+  if (impact.life <= 0) {
+    const data = impact.group.userData;
+    if (data) {
+      data.sparkGeo?.dispose();
+      data.sparkMat?.dispose();
+      data.flashMat?.dispose();
+    }
+    scene.remove(impact.group);
+    return false;
+  }
+
+  const alpha = impact.life / impact.maxLife;
+  const data = impact.group.userData;
+  if (data && data.velocities) {
+    const attr = data.sparkGeo.getAttribute("position") as THREE.BufferAttribute;
+    const array = attr.array as Float32Array;
+    for (let i = 0; i < data.velocities.length; i++) {
+      const v = data.velocities[i] as THREE.Vector3;
+      v.y -= 9.8 * delta;
+      array[i * 3] += v.x * delta;
+      array[i * 3 + 1] += v.y * delta;
+      array[i * 3 + 2] += v.z * delta;
+    }
+    attr.needsUpdate = true;
+    data.sparkMat.opacity = alpha;
+    data.flashMat.opacity = alpha * alpha;
+    data.flashSprite.scale.setScalar(0.3 * alpha);
+  }
+  return true;
+}

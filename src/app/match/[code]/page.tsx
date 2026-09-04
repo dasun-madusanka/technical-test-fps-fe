@@ -38,30 +38,27 @@ export default function MatchPage() {
   const hasReported = useRef(false);
 
   useEffect(() => {
-    fetch("/api/loadout/inventory")
-      .then((res) => res.json())
-      .then(setInventory)
-      .catch(() => setInventory(null));
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((res) => res.json())
-      .then(setSettings)
-      .catch(() => setSettings(null));
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
 
     async function setup() {
-      const res = await fetch("/api/game-token");
-      if (!res.ok) {
+      const [tokenRes, invRes, setRes] = await Promise.all([
+        fetch("/api/game-token"),
+        fetch("/api/loadout/inventory"),
+        fetch("/api/settings"),
+      ]);
+
+      if (!tokenRes.ok) {
         setError("You need to log in to play.");
         return;
       }
-      const { token, userId } = await res.json();
-      if (cancelled || !canvasRef.current || !inventory || !settings) return;
+      const { token, userId } = await tokenRes.json();
+      const loadedInv = invRes.ok ? await invRes.json() : null;
+      const loadedSet = setRes.ok ? await setRes.json() : null;
+
+      if (cancelled || !canvasRef.current) return;
+
+      setInventory(loadedInv);
+      setSettings(loadedSet);
 
       const socket = getGameSocket(token);
       const game = new MultiplayerArena(
@@ -69,8 +66,8 @@ export default function MatchPage() {
         socket,
         setState,
         params.code,
-        inventory,
-        settings
+        loadedInv ?? undefined,
+        loadedSet ?? undefined
       );
       game.setMyUserId(userId);
       gameRef.current = game;
@@ -81,8 +78,9 @@ export default function MatchPage() {
     return () => {
       cancelled = true;
       gameRef.current?.dispose();
+      gameRef.current = null;
     };
-  }, [params.code, inventory, settings]);
+  }, [params.code]);
 
   useEffect(() => {
     if (state.matchOver && !hasReported.current) {

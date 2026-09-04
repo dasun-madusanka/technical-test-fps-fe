@@ -15,7 +15,21 @@ import {
   attachWeaponToCharacter,
   createMuzzleFlashSprite,
   spawnTracer,
+  spawnBulletImpact,
+  updateBulletImpact,
+  BulletImpact,
 } from "./assets/GameAssets";
+import {
+  PROPS_LAYOUT,
+  STREET_TILES,
+  resolveMovementCollision,
+  getSafeSpawnPoint,
+  isSpawnPositionSafe,
+  ARENA_HALF_SIZE,
+  BOUNDARY_LIMIT,
+  EYE_HEIGHT,
+  PLAYER_RADIUS,
+} from "./arena/ArenaLayout";
 import { soundManager, weaponSound } from "./audio/SoundManager";
 
 interface RemotePlayer {
@@ -27,7 +41,8 @@ interface RemotePlayer {
   lastAmmo: number;
   lastHealth: number;
   moving: boolean;
-  lastY: number; 
+  lastY: number;
+  wasAlive: boolean;
 }
 
 export interface MultiplayerState {
@@ -55,14 +70,11 @@ export interface MultiplayerState {
 
 type StateListener = (state: MultiplayerState) => void;
 
-const ARENA_HALF_SIZE = 15;
 const PLAYER_SPEED = 5.5;
-const PLAYER_HEIGHT = 1.6;
 const GRAVITY = -18;
 const JUMP_SPEED = 6.5;
 const RELOAD_TIME_MS = 1500;
 const MOVE_SEND_INTERVAL_MS = 50;
-const PLAYER_COLLISION_RADIUS = 0.4; // matches the server's PLAYER_RADIUS used for shot hit-testing
 
 const DEFAULT_INVENTORY: WeaponInventory = {
   primary: {
@@ -135,13 +147,16 @@ export class MultiplayerArena {
     return this.inventory[this.currentSlot];
   }
 
-  private opponentMesh: THREE.Mesh | null = null;
-  private opponentTargetPos = new THREE.Vector3();
-
   private remotePlayers = new Map<string, RemotePlayer>();
+  private pendingSpawns = new Set<string>();
   private obstacles: THREE.Object3D[] = [];
+  private boundaryWalls: THREE.Mesh[] = [];
+  private bulletImpacts: BulletImpact[] = [];
   private hitFlashEl: HTMLDivElement | null = null;
-  private colliders: { x: number; z: number; radius: number }[] = [];   // <-- add this
+  private deathVignetteEl: HTMLDivElement | null = null;
+  private deathCamTimer = 0;
+  private deathRoll = 0;
+  private targetDeathRoll = 0;
 
   private state: MultiplayerState = {
     connectionStatus: "connecting",
@@ -186,7 +201,7 @@ export class MultiplayerArena {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x8fd0f0);
     this.scene.fog = new THREE.Fog(0x9fdcff, 35, 90);
-    this.renderer.shadowMap.enabled = true; // wasn't enabled at all before
+    this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -198,7 +213,11 @@ export class MultiplayerArena {
       0.1,
       1000,
     );
-    this.camera.position.set(0, PLAYER_HEIGHT, 10);
+
+    const startSpawn = getSafeSpawnPoint();
+    this.camera.position.set(startSpawn.x, EYE_HEIGHT, startSpawn.z);
+    this.yaw = startSpawn.yaw;
+    this.camera.quaternion.setFromEuler(new THREE.Euler(0, this.yaw, 0, "YXZ"));
 
     this.camera.add(this.weaponRig);
     this.scene.add(this.camera);
@@ -230,97 +249,48 @@ export class MultiplayerArena {
   }
 
   private async loadEnvironmentProps() {
-  const [
-    barrel,
-    cinderBlock,
-    pallet,
-    chest,
-    trafficBarrier,
-    trafficCone,
-    containerRed,
-    containerGreen,
-    trashBag,        // <-- add
-    streetLights,    // <-- add
-    waterTower,      // <-- add
-  ] = await Promise.all([
-    gameAssets.loadProp(ASSET_PATHS.barrel),
-    gameAssets.loadProp(ASSET_PATHS.cinderBlock),
-    gameAssets.loadProp(ASSET_PATHS.pallet),
-    gameAssets.loadProp(ASSET_PATHS.chest),
-    gameAssets.loadProp(ASSET_PATHS.trafficBarrier),
-    gameAssets.loadProp(ASSET_PATHS.trafficCone),
-    gameAssets.loadProp(ASSET_PATHS.containerRed),
-    gameAssets.loadProp(ASSET_PATHS.containerGreen),
-    gameAssets.loadProp(ASSET_PATHS.trashBag),        // <-- add
-    gameAssets.loadProp(ASSET_PATHS.streetLights),    // <-- add
-    gameAssets.loadProp(ASSET_PATHS.waterTower),      // <-- add
-  ]);
+    const uniqueKeys = Array.from(
+      new Set([
+        ...STREET_TILES.map((t) => t.assetKey),
+        ...PROPS_LAYOUT.map((p) => p.assetKey),
+      ]),
+    ) as (keyof typeof ASSET_PATHS)[];
 
-  // One canonical layout: every solid prop gets a collision radius; decorative
-  // ones (cones, trash bags) get none, so players can walk through them.
-  type PropSpot = { base: THREE.Group; x: number; z: number; radius: number | null; scale?: number };
+    const loadedBases = await Promise.all(
+      uniqueKeys.map(async (key) => {
+        const path = ASSET_PATHS[key];
+        const base = await gameAssets.loadProp(path);
+        return [key, base] as const;
+      }),
+    );
+    const baseMap = new Map<string, THREE.Group>(loadedBases);
 
-  const layout: PropSpot[] = [
-    // cover spots — match the server's obstacles.ts exactly, so shots and movement agree on where these block
-    { base: barrel, x: 4, z: 4, radius: 0.55 },
-    { base: cinderBlock, x: -5, z: -3, radius: 0.6 },
-    { base: pallet, x: 6, z: -6, radius: 0.9 },
-    { base: chest, x: -6, z: 5, radius: 0.65 },
-    { base: trafficBarrier, x: 0, z: -8, radius: 0.75 },
+    // Spawn modular street tiles on ground
+    for (const tile of STREET_TILES) {
+      const base = baseMap.get(tile.assetKey);
+      if (!base) continue;
+      const mesh = gameAssets.spawnProp(base);
+      mesh.position.set(tile.x, tile.y, tile.z);
+      mesh.rotation.y = tile.rotationY;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    }
 
-    // extra cover (decorative-only on the server today — flag this if you also want shots blocked by these)
-    { base: barrel, x: -3, z: 7, radius: 0.55 },
-    { base: cinderBlock, x: 3, z: -3, radius: 0.6 },
-    { base: chest, x: 8, z: 2, radius: 0.65 },
-    { base: pallet, x: -8, z: -2, radius: 0.9 },
-    { base: trafficBarrier, x: -2, z: 9, radius: 0.75 },
+    // Spawn tactical environment props
+    for (const prop of PROPS_LAYOUT) {
+      const base = baseMap.get(prop.assetKey);
+      if (!base) continue;
+      const model = gameAssets.spawnProp(base);
+      model.position.set(prop.x, prop.y, prop.z);
+      model.rotation.y = prop.rotationY;
+      if (prop.scale) model.scale.setScalar(prop.scale);
+      this.scene.add(model);
 
-    // landmark — big, collidable, roughly centered off to one side
-    { base: waterTower, x: 9, z: 9, radius: 1.6, scale: 1.1 },
-
-    // street lights — thin poles dotted along the interior, small collision radius
-    { base: streetLights, x: 10, z: -10, radius: 0.35 },
-    { base: streetLights, x: -10, z: 10, radius: 0.35 },
-    { base: streetLights, x: 0, z: 10, radius: 0.35 },
-    { base: streetLights, x: 0, z: -12, radius: 0.35 },
-
-    // decorative clutter — no collider, purely visual
-    { base: trafficCone, x: 2, z: 6, radius: null },
-    { base: trafficCone, x: -2, z: -6, radius: null },
-    { base: trashBag, x: 4.8, z: 3.2, radius: null },
-    { base: trashBag, x: -5.6, z: -2.4, radius: null },
-    { base: trashBag, x: 6.6, z: -5.4, radius: null },
-  ];
-
-  for (const spot of layout) {
-    const prop = gameAssets.spawnProp(spot.base);
-    prop.position.set(spot.x, 0, spot.z);
-    prop.rotation.y = Math.random() * Math.PI * 2;
-    if (spot.scale) prop.scale.setScalar(spot.scale);
-    this.scene.add(prop);
-    this.obstacles.push(prop);
-    if (spot.radius !== null) {
-      this.colliders.push({ x: spot.x, z: spot.z, radius: spot.radius });
+      if (prop.collider) {
+        this.obstacles.push(model);
+      }
     }
   }
-
-  // perimeter containers — kept as-is, purely decorative corner dressing;
-  // the boundary walls added in buildArena() now do the actual enclosing.
-  const perimeterSpots: [number, number, number][] = [
-    [-14, 0, -14],
-    [14, 0, -14],
-    [-14, 0, 14],
-    [14, 0, 14],
-  ];
-  perimeterSpots.forEach(([x, y, z], i) => {
-    const base = i % 2 === 0 ? containerRed : containerGreen;
-    const container = gameAssets.spawnProp(base);
-    container.position.set(x, y, z);
-    container.rotation.y = Math.random() * Math.PI * 2;
-    this.scene.add(container);
-    this.colliders.push({ x, z, radius: 1.8 }); // <-- add: these are big, should block too
-  });
-}
 
   private async loadLocalWeapons() {
     const bases = await Promise.all(
@@ -376,10 +346,31 @@ export class MultiplayerArena {
       this.updateState({ connectionStatus: "queued" }),
     );
 
-    this.socket.on("match:found", () => {
-      this.updateState({ connectionStatus: "matched" });
-      this.start();
-    });
+    this.socket.on(
+      "match:found",
+      (data?: {
+        roomId: string;
+        players?: {
+          id: string;
+          username: string;
+          x?: number;
+          y?: number;
+          z?: number;
+          yaw?: number;
+        }[];
+      }) => {
+        this.updateState({ connectionStatus: "matched" });
+        const me = data?.players?.find((p) => p.id === this.myUserId);
+        if (me && me.x !== undefined && me.z !== undefined) {
+          this.camera.position.set(me.x, EYE_HEIGHT, me.z);
+          this.yaw = me.yaw ?? 0;
+          this.camera.quaternion.setFromEuler(
+            new THREE.Euler(0, this.yaw, 0, "YXZ"),
+          );
+        }
+        this.start();
+      },
+    );
 
     this.socket.on(
       "state:update",
@@ -411,9 +402,10 @@ export class MultiplayerArena {
         } else {
           this.updateState({ opponentHealth: data.health });
           const remote = this.remotePlayers.get(data.targetId);
-          if (remote && data.health > 0) {
+          if (remote && data.health > 0 && remote.wasAlive) {
             gameAssets.playAction(remote.character, "emote-no", 0.08, true);
             setTimeout(() => {
+              if (!remote.wasAlive) return;
               if (remote.moving)
                 gameAssets.playAction(remote.character, "sprint", 0.15);
               else gameAssets.playAction(remote.character, "holding-right", 0.15);
@@ -430,37 +422,23 @@ export class MultiplayerArena {
       (data: { targetId: string; byId: string; byUsername?: string }) => {
         if (data.targetId === this.myUserId) {
           this.pushKillFeed(`${data.byUsername ?? "Opponent"} eliminated you`);
-          this.updateState({ isDead: true, myHealth: 0, respawnCountdown: 3 });
-          soundManager.play2D("death");   // <-- add
-          soundManager.stopLoop("local-footsteps");
-          this.beginLocalRespawnCountdown();
+          this.triggerLocalDeath();
         } else {
           this.pushKillFeed(`You eliminated ${this.state.opponentUsername}`);
           this.updateState({ opponentHealth: 0 });
           soundManager.play2D("kill_confirm", 0.8);
+          this.triggerRemoteDeath(data.targetId);
         }
       },
     );
 
     this.socket.on(
       "player:respawned",
-      (data: { userId: string; x: number; y: number; z: number }) => {
+      (data: { userId: string; x: number; y: number; z: number; yaw?: number }) => {
         if (data.userId === this.myUserId) {
-          this.camera.position.set(data.x, data.y, data.z);
-          this.currentSlot = 0;
-          this.ammoPerWeapon = this.inventory.map((w) => w.magazineSize);
-          this.updateState({
-            isDead: false,
-            myHealth: 100,
-            myAmmo: this.ammoPerWeapon[0],
-          });
+          this.triggerLocalRespawn(data.x, data.y, data.z, data.yaw);
         } else {
-          const remote = this.remotePlayers.get(data.userId);
-          if (remote) {
-            remote.character.model.position.set(data.x, 0, data.z);
-            remote.targetPos.set(data.x, 0, data.z);
-            gameAssets.playAction(remote.character, "holding-right", 0.1);
-          }
+          this.triggerRemoteRespawn(data.userId, data.x, data.z, data.yaw);
         }
       },
     );
@@ -493,6 +471,88 @@ export class MultiplayerArena {
     this.socket.on("disconnect", () =>
       this.updateState({ connectionStatus: "disconnected" }),
     );
+  }
+
+  private triggerLocalDeath() {
+    this.deathCamTimer = 0;
+    this.targetDeathRoll = (Math.random() < 0.5 ? -1 : 1) * 0.45; // ~26 deg tilt
+    this.updateState({ isDead: true, myHealth: 0, respawnCountdown: 3 });
+    soundManager.play2D("death");
+    soundManager.stopLoop("local-footsteps");
+    this.setDeathVignette(true);
+    this.beginLocalRespawnCountdown();
+  }
+
+  private triggerLocalRespawn(x: number, y: number, z: number, yaw?: number) {
+    this.deathCamTimer = 0;
+    this.deathRoll = 0;
+    this.camera.position.set(x, EYE_HEIGHT, z);
+    if (yaw !== undefined) {
+      this.yaw = yaw;
+    }
+    this.pitch = 0;
+    this.camera.quaternion.setFromEuler(new THREE.Euler(0, this.yaw, 0, "YXZ"));
+    this.weaponRig.visible = true;
+    this.weaponRig.position.set(0, 0, 0);
+    this.verticalVelocity = 0;
+    this.isGrounded = true;
+    this.currentSlot = 0;
+    this.ammoPerWeapon = this.inventory.map((w) => w.magazineSize);
+    this.setDeathVignette(false);
+    this.updateState({
+      isDead: false,
+      myHealth: 100,
+      myAmmo: this.ammoPerWeapon[0],
+    });
+    soundManager.play2D("respawn", 0.7);
+  }
+
+  private triggerRemoteDeath(targetId: string) {
+    const remote = this.remotePlayers.get(targetId);
+    if (!remote || !remote.wasAlive) return;
+    remote.wasAlive = false;
+    remote.moving = false;
+    soundManager.stopLoop(`remote-footsteps-${targetId}`);
+    soundManager.playAt("death", remote.character.model, 0.85, 12);
+    if (remote.weaponModel) {
+      remote.weaponModel.visible = false;
+    }
+    gameAssets.playDeath(remote.character);
+  }
+
+  private triggerRemoteRespawn(
+    userId: string,
+    x: number,
+    z: number,
+    yaw?: number,
+  ) {
+    const remote = this.remotePlayers.get(userId);
+    if (!remote) return;
+    remote.character.model.position.set(x, 0, z);
+    remote.targetPos.set(x, 0, z);
+    if (yaw !== undefined) {
+      remote.character.model.rotation.y = yaw + Math.PI;
+    }
+    remote.wasAlive = true;
+    remote.moving = false;
+    remote.character.model.visible = true;
+    if (remote.weaponModel) {
+      remote.weaponModel.visible = true;
+    }
+    gameAssets.resetCharacterAfterDeath(remote.character, "holding-right");
+  }
+
+  private setDeathVignette(show: boolean) {
+    if (!this.deathVignetteEl) {
+      const el = document.createElement("div");
+      el.style.cssText =
+        "position:fixed;inset:0;pointer-events:none;z-index:35;opacity:0;transition:opacity 0.35s ease-out;";
+      el.style.background =
+        "radial-gradient(circle at center, rgba(140, 0, 0, 0.2) 20%, rgba(90, 0, 0, 0.75) 100%)";
+      this.canvas.parentElement?.appendChild(el);
+      this.deathVignetteEl = el;
+    }
+    this.deathVignetteEl.style.opacity = show ? "1" : "0";
   }
 
   private triggerLocalHitFlash(kind: "landed" | "taken") {
@@ -529,6 +589,8 @@ export class MultiplayerArena {
       alive: boolean;
     }[],
   ) {
+    const activeIds = new Set<string>();
+
     for (const p of players) {
       if (p.id === this.myUserId) {
         this.updateState({
@@ -539,19 +601,39 @@ export class MultiplayerArena {
         continue;
       }
 
+      activeIds.add(p.id);
       let remote = this.remotePlayers.get(p.id);
       if (!remote) {
         this.updateState({ opponentUsername: p.username });
-        this.spawnRemotePlayer(p.id, p.weaponKey ?? "rifle"); // async, fills in remotePlayers once loaded
-        continue; // skip until it's actually loaded
+        if (!this.pendingSpawns.has(p.id)) {
+          this.pendingSpawns.add(p.id);
+          this.spawnRemotePlayer(p.id, p.weaponKey ?? "rifle", p.x, p.z, p.yaw);
+        }
+        continue;
       }
 
-      remote.targetPos.set(p.x, 0, p.z); // character root sits on the ground, ignore the server's eye-height y
+      // If remote player is already dead, check if they respawned on the server
+      if (!remote.wasAlive) {
+        if (p.alive) {
+          this.triggerRemoteRespawn(p.id, p.x, p.z, p.yaw);
+        }
+        this.updateState({ opponentHealth: p.health, opponentKills: p.kills });
+        continue;
+      }
+
+      // If remote player was alive and server reports dead
+      if (!p.alive) {
+        this.triggerRemoteDeath(p.id);
+        this.updateState({ opponentHealth: p.health, opponentKills: p.kills });
+        continue;
+      }
+
+      remote.targetPos.set(p.x, 0, p.z);
       remote.character.model.rotation.y = p.yaw + Math.PI;
 
-      if (p.y > remote.lastY + 0.05 && remote.lastY <= PLAYER_HEIGHT + 0.05) {
+      if (p.y > remote.lastY + 0.05 && remote.lastY <= EYE_HEIGHT + 0.05) {
         soundManager.playAt("jump", remote.character.model, 0.5, 8);
-      } else if (p.y <= PLAYER_HEIGHT + 0.01 && remote.lastY > PLAYER_HEIGHT + 0.05) {
+      } else if (p.y <= EYE_HEIGHT + 0.01 && remote.lastY > EYE_HEIGHT + 0.05) {
         soundManager.playAt("land", remote.character.model, 0.5, 8);
       }
       remote.lastY = p.y;
@@ -565,15 +647,14 @@ export class MultiplayerArena {
       // detect a shot: ammo went down since last update -> play fire feedback
       if (p.ammo < remote.lastAmmo) {
         this.triggerRemoteMuzzleFlash(remote);
-        soundManager.playAt(                                                    // <-- add
+        soundManager.playAt(
           weaponSound(p.weaponKey ?? remote.currentWeaponKey, "fire"),
           remote.weaponModel ?? remote.character.model,
           0.9,
           12,
         );
-      }else if (p.ammo > remote.lastAmmo) {
-        // ammo went UP -> their reload just completed server-side
-        soundManager.playAt(                                                    // <-- add
+      } else if (p.ammo > remote.lastAmmo) {
+        soundManager.playAt(
           weaponSound(remote.currentWeaponKey, "reload"),
           remote.character.model,
           0.6,
@@ -589,14 +670,16 @@ export class MultiplayerArena {
       }
       remote.lastHealth = p.health;
 
-      // death
-      if (!p.alive) {
-        gameAssets.playAction(remote.character, "die", 0.15, true);
-        soundManager.playAt("death", remote.character.model, 0.7, 10);          // <-- add
-        soundManager.stopLoop(`remote-footsteps-${p.id}`);
-      }
-
       this.updateState({ opponentHealth: p.health, opponentKills: p.kills });
+    }
+
+    // Clean up disconnected players
+    for (const [id, remote] of this.remotePlayers) {
+      if (!activeIds.has(id)) {
+        this.scene.remove(remote.character.model);
+        soundManager.stopLoop(`remote-footsteps-${id}`);
+        this.remotePlayers.delete(id);
+      }
     }
   }
 
@@ -645,46 +728,73 @@ export class MultiplayerArena {
         this.tracers.splice(i, 1);
       }
     }
+
+    for (let i = this.bulletImpacts.length - 1; i >= 0; i--) {
+      const alive = updateBulletImpact(this.bulletImpacts[i], delta, this.scene);
+      if (!alive) {
+        this.bulletImpacts.splice(i, 1);
+      }
+    }
   }
 
-  private async spawnRemotePlayer(id: string, weaponKey: string) {
-    const characterPath = pickCharacterPath(id);
-    const [charBase, weaponBase] = await Promise.all([
-      gameAssets.loadCharacter(characterPath),
-      gameAssets.loadProp(
-        WEAPON_ASSET_BY_KEY[weaponKey] ?? WEAPON_ASSET_BY_KEY.rifle,
-      ),
-    ]);
-    if (this.remotePlayers.has(id)) return; // race guard
+  private async spawnRemotePlayer(
+    id: string,
+    weaponKey: string,
+    initX = 0,
+    initZ = 0,
+    initYaw = 0,
+  ) {
+    if (this.remotePlayers.has(id)) return;
+    try {
+      const characterPath = pickCharacterPath(id);
+      const [charBase, weaponBase] = await Promise.all([
+        gameAssets.loadCharacter(characterPath),
+        gameAssets.loadProp(
+          WEAPON_ASSET_BY_KEY[weaponKey] ?? WEAPON_ASSET_BY_KEY.rifle,
+        ),
+      ]);
+      if (this.remotePlayers.has(id)) return;
 
-    const character = gameAssets.spawnCharacter(charBase);
-    character.model.scale.setScalar(0.65);
-    const weaponModel = gameAssets.spawnProp(weaponBase);
-    attachWeaponToCharacter(character, weaponModel, weaponKey);
+      const character = gameAssets.spawnCharacter(charBase);
+      character.model.scale.setScalar(0.65);
+      character.model.position.set(initX, 0, initZ);
+      character.model.rotation.y = initYaw + Math.PI;
 
-    const muzzleFlash = createMuzzleFlashSprite();
-    muzzleFlash.position.set(0, 0.05, -0.6);
-    weaponModel.add(muzzleFlash);
+      // CRITICAL: Disable frustum culling on all character meshes to prevent random disappearance!
+      character.model.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          obj.frustumCulled = false;
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+        }
+      });
 
-    const group = new THREE.Group();
-    group.add(character.model);
-    const box = new THREE.Box3().setFromObject(character.model);
-    character.model.position.y -= box.min.y; // correct once, relative to the group
-    character.model.rotation.y = Math.PI;
-    this.scene.add(group);
-    gameAssets.playAction(character, "holding-right", 0.1);
+      const weaponModel = gameAssets.spawnProp(weaponBase);
+      attachWeaponToCharacter(character, weaponModel, weaponKey);
 
-    this.remotePlayers.set(id, {
-      character,
-      targetPos: character.model.position.clone(),
-      weaponModel,
-      muzzleFlash,
-      currentWeaponKey: weaponKey,
-      lastAmmo: Infinity,
-      lastHealth: 100,
-      moving: false,
-      lastY: PLAYER_HEIGHT,
-    });
+      const muzzleFlash = createMuzzleFlashSprite();
+      muzzleFlash.position.set(0, 0.05, -0.6);
+      weaponModel.add(muzzleFlash);
+
+      // DIRECTLY ADD TO SCENE — NO PARENT GROUP OFFSET!
+      this.scene.add(character.model);
+      gameAssets.playAction(character, "holding-right", 0.1);
+
+      this.remotePlayers.set(id, {
+        character,
+        targetPos: new THREE.Vector3(initX, 0, initZ),
+        weaponModel,
+        muzzleFlash,
+        currentWeaponKey: weaponKey,
+        lastAmmo: Infinity,
+        lastHealth: 100,
+        moving: false,
+        lastY: EYE_HEIGHT,
+        wasAlive: true,
+      });
+    } finally {
+      this.pendingSpawns.delete(id);
+    }
   }
 
   private swapRemoteWeapon(remote: RemotePlayer, weaponKey: string) {
@@ -710,43 +820,46 @@ export class MultiplayerArena {
   }
 
   private buildArena() {
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2, ARENA_HALF_SIZE * 2),
-    new THREE.MeshStandardMaterial({ color: 0x5c8a4a, roughness: 0.9 }),
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  this.scene.add(floor);
+    // Underlying asphalt base plane
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2 + 10, ARENA_HALF_SIZE * 2 + 10),
+      new THREE.MeshStandardMaterial({ color: 0x24282b, roughness: 0.95 }),
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.01;
+    floor.receiveShadow = true;
+    this.scene.add(floor);
 
-  // enclosing perimeter walls — visible now, matching the invisible movement
-  // clamp in updatePlayerMovement() so what you see is what blocks you
-  const WALL_HEIGHT = 4;
-  const WALL_THICKNESS = 1;
-  const wallMaterial = new THREE.MeshStandardMaterial({
-    color: 0x3b3f45,
-    roughness: 0.85,
-    metalness: 0.15,
-  });
-  const span = ARENA_HALF_SIZE * 2 + WALL_THICKNESS;
+    // Enclosing perimeter walls
+    const WALL_HEIGHT = 4.5;
+    const WALL_THICKNESS = 1.2;
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: 0x30343a,
+      roughness: 0.85,
+      metalness: 0.2,
+    });
+    const span = ARENA_HALF_SIZE * 2 + WALL_THICKNESS;
 
-  const northSouth = new THREE.BoxGeometry(span, WALL_HEIGHT, WALL_THICKNESS);
-  const eastWest = new THREE.BoxGeometry(WALL_THICKNESS, WALL_HEIGHT, span);
+    const northSouth = new THREE.BoxGeometry(span, WALL_HEIGHT, WALL_THICKNESS);
+    const eastWest = new THREE.BoxGeometry(WALL_THICKNESS, WALL_HEIGHT, span);
 
-  const north = new THREE.Mesh(northSouth, wallMaterial);
-  north.position.set(0, WALL_HEIGHT / 2, -ARENA_HALF_SIZE - WALL_THICKNESS / 2);
-  const south = new THREE.Mesh(northSouth, wallMaterial);
-  south.position.set(0, WALL_HEIGHT / 2, ARENA_HALF_SIZE + WALL_THICKNESS / 2);
-  const east = new THREE.Mesh(eastWest, wallMaterial);
-  east.position.set(ARENA_HALF_SIZE + WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
-  const west = new THREE.Mesh(eastWest, wallMaterial);
-  west.position.set(-ARENA_HALF_SIZE - WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
+    const north = new THREE.Mesh(northSouth, wallMaterial);
+    north.position.set(0, WALL_HEIGHT / 2, -ARENA_HALF_SIZE - WALL_THICKNESS / 2);
+    const south = new THREE.Mesh(northSouth, wallMaterial);
+    south.position.set(0, WALL_HEIGHT / 2, ARENA_HALF_SIZE + WALL_THICKNESS / 2);
+    const east = new THREE.Mesh(eastWest, wallMaterial);
+    east.position.set(ARENA_HALF_SIZE + WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
+    const west = new THREE.Mesh(eastWest, wallMaterial);
+    west.position.set(-ARENA_HALF_SIZE - WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
 
-  for (const wall of [north, south, east, west]) {
-    wall.castShadow = true;
-    wall.receiveShadow = true;
-    this.scene.add(wall);
+    this.boundaryWalls = [north, south, east, west];
+    for (const wall of this.boundaryWalls) {
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      this.scene.add(wall);
+      this.obstacles.push(wall);
+    }
   }
-}
 
   private setupLights() {
     this.scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x4a6b3a, 1.1));
@@ -804,7 +917,7 @@ export class MultiplayerArena {
   }
 
   private handleMouseMove = (e: MouseEvent) => {
-    if (document.pointerLockElement !== this.canvas) return;
+    if (document.pointerLockElement !== this.canvas || this.state.isDead) return;
     const sensitivity = 0.0022 * (this.settings.mouseSens / 0.7);
     this.yaw -= e.movementX * sensitivity;
     this.pitch -= e.movementY * sensitivity;
@@ -852,10 +965,45 @@ export class MultiplayerArena {
 
     const muzzleWorld = new THREE.Vector3();
     this.muzzleFlash.getWorldPosition(muzzleWorld);
-    const farPoint = muzzleWorld
-      .clone()
-      .add(direction.clone().multiplyScalar(40));
-    const tracer = spawnTracer(this.scene, muzzleWorld, farPoint);
+
+    // Raycast to determine what bullet hits first (remote players, obstacles, or walls)
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+
+    const remoteModels: THREE.Object3D[] = [];
+    for (const remote of this.remotePlayers.values()) {
+      if (remote.wasAlive && remote.character.model.visible) {
+        remoteModels.push(remote.character.model);
+      }
+    }
+    const allTargets = [...remoteModels, ...this.obstacles, ...this.boundaryWalls];
+    const hits = raycaster.intersectObjects(allTargets, true);
+
+    let endPoint = muzzleWorld.clone().add(direction.clone().multiplyScalar(40));
+
+    if (hits.length > 0) {
+      const firstHit = hits[0];
+      endPoint = firstHit.point;
+
+      let isPlayerHit = false;
+      let cur: THREE.Object3D | null = firstHit.object;
+      while (cur) {
+        if (remoteModels.includes(cur)) {
+          isPlayerHit = true;
+          break;
+        }
+        cur = cur.parent;
+      }
+
+      if (!isPlayerHit) {
+        // Bullet hit an obstacle or wall: spawn impact effect and play sound
+        const impact = spawnBulletImpact(this.scene, firstHit.point, firstHit.face?.normal);
+        this.bulletImpacts.push(impact);
+        soundManager.playAt("hit_taken", firstHit.object, 0.5, 12);
+      }
+    }
+
+    const tracer = spawnTracer(this.scene, muzzleWorld, endPoint);
     if (tracer) this.tracers.push(tracer);
 
     this.socket.emit("player:shoot", {
@@ -914,7 +1062,22 @@ export class MultiplayerArena {
   }
 
   private updatePlayerMovement(delta: number) {
-    if (this.state.isDead) return;
+    if (this.state.isDead) {
+      this.deathCamTimer += delta;
+      const t = Math.min(1, this.deathCamTimer / 0.45);
+      const ease = 1 - Math.pow(1 - t, 3);
+      this.camera.position.y = THREE.MathUtils.lerp(EYE_HEIGHT, 0.32, ease);
+      this.deathRoll = THREE.MathUtils.lerp(0, this.targetDeathRoll, ease);
+      this.camera.quaternion.setFromEuler(
+        new THREE.Euler(this.pitch, this.yaw, this.deathRoll, "YXZ"),
+      );
+      this.weaponRig.position.y = THREE.MathUtils.lerp(0, -0.65, ease);
+      if (t >= 0.85) {
+        this.weaponRig.visible = false;
+      }
+      return;
+    }
+
     const forward = new THREE.Vector3(
       Math.sin(this.yaw),
       0,
@@ -936,44 +1099,28 @@ export class MultiplayerArena {
       this.velocity.normalize().multiplyScalar(PLAYER_SPEED * delta);
       const next = this.camera.position.clone().add(this.velocity);
 
-      this.resolveObstacleCollisions(next);
-      const bound = ARENA_HALF_SIZE - 0.6;
-      next.x = Math.max(-bound, Math.min(bound, next.x));
-      next.z = Math.max(-bound, Math.min(bound, next.z));
+      resolveMovementCollision(next, PLAYER_RADIUS, 3);
+      next.x = Math.max(-BOUNDARY_LIMIT, Math.min(BOUNDARY_LIMIT, next.x));
+      next.z = Math.max(-BOUNDARY_LIMIT, Math.min(BOUNDARY_LIMIT, next.z));
       this.camera.position.x = next.x;
       this.camera.position.z = next.z;
       if (this.isGrounded) soundManager.loopAt("local-footsteps", "footstep_run", null, 0.5);
-    }else {
+    } else {
       soundManager.stopLoop("local-footsteps");
     }
 
-
     this.verticalVelocity += GRAVITY * delta;
     this.camera.position.y += this.verticalVelocity * delta;
-    if (this.camera.position.y <= PLAYER_HEIGHT) {
-      this.camera.position.y = PLAYER_HEIGHT;
+    if (this.camera.position.y <= EYE_HEIGHT) {
+      this.camera.position.y = EYE_HEIGHT;
       this.verticalVelocity = 0;
       if (!this.isGrounded) soundManager.play2D("land", 0.5);
       this.isGrounded = true;
     }
   }
 
-  private resolveObstacleCollisions(pos: THREE.Vector3) {
-  for (const c of this.colliders) {
-    const dx = pos.x - c.x;
-    const dz = pos.z - c.z;
-    const distSq = dx * dx + dz * dz;
-    const minDist = c.radius + PLAYER_COLLISION_RADIUS;
-    if (distSq < minDist * minDist && distSq > 1e-6) {
-      const dist = Math.sqrt(distSq);
-      const push = minDist - dist;
-      pos.x += (dx / dist) * push;
-      pos.z += (dz / dist) * push;
-    }
-  }
-}
-
   private sendMovementIfDue() {
+    if (this.state.isDead) return;
     const now = performance.now();
     if (now - this.lastMoveSent < MOVE_SEND_INTERVAL_MS) return;
     this.lastMoveSent = now;
@@ -985,22 +1132,22 @@ export class MultiplayerArena {
     });
   }
 
-  private interpolateOpponent(delta: number) {
-    if (!this.opponentMesh) return;
-    this.opponentMesh.position.lerp(
-      this.opponentTargetPos,
-      Math.min(1, delta * 10),
-    );
-  }
-
   private interpolateRemotePlayers(delta: number) {
     for (const [id, remote] of this.remotePlayers) {
+      if (!remote.wasAlive) {
+        remote.character.mixer.update(delta);
+        continue;
+      }
+
       const before = remote.character.model.position.clone();
       remote.character.model.position.lerp(
         remote.targetPos,
-        Math.min(1, delta * 10),
+        Math.min(1, delta * 15),
       );
-      const moved = remote.character.model.position.distanceTo(before) > 0.001;
+      // Strictly enforce feet on ground
+      remote.character.model.position.y = 0;
+
+      const moved = remote.character.model.position.distanceTo(before) > 0.005;
       if (moved !== remote.moving) {
         remote.moving = moved;
         gameAssets.playAction(
@@ -1009,9 +1156,9 @@ export class MultiplayerArena {
           0.2,
         );
         if (moved) {
-          soundManager.loopAt(`remote-footsteps-${id}`, "footstep_run", remote.character.model, 0.6);   // <-- add
+          soundManager.loopAt(`remote-footsteps-${id}`, "footstep_run", remote.character.model, 0.6);
         } else {
-          soundManager.stopLoop(`remote-footsteps-${id}`);   // <-- add
+          soundManager.stopLoop(`remote-footsteps-${id}`);
         }
       }
       remote.character.mixer.update(delta);
@@ -1048,6 +1195,22 @@ export class MultiplayerArena {
     document.removeEventListener("keyup", this.handleKeyUp);
     this.socket.removeAllListeners();
     this.hitFlashEl?.remove();
+    this.deathVignetteEl?.remove();
+    for (const remote of this.remotePlayers.values()) {
+      this.scene.remove(remote.character.model);
+    }
+    this.remotePlayers.clear();
+    this.pendingSpawns.clear();
+    for (const impact of this.bulletImpacts) {
+      const data = impact.group.userData;
+      if (data) {
+        data.sparkGeo?.dispose();
+        data.sparkMat?.dispose();
+        data.flashMat?.dispose();
+      }
+      this.scene.remove(impact.group);
+    }
+    this.bulletImpacts = [];
     soundManager.stopAllLoops();
     this.renderer.dispose();
   }
