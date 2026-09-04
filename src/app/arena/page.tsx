@@ -39,28 +39,53 @@ export default function ArenaPage() {
   const [inventory, setInventory] = useState<WeaponInventory | null>(null);
 
   useEffect(() => {
+    let ignore = false;
     fetch("/api/loadout/inventory")
       .then((res) => res.json())
-      .then(setInventory)
-      .catch(() => setInventory(null));
+      .then((data) => {
+        if (!ignore) setInventory(data);
+      })
+      .catch(() => {
+        if (!ignore) setInventory(null);
+      });
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   useEffect(() => {
+    let ignore = false;
     fetch("/api/settings")
       .then((res) => res.json())
-      .then(setSettings)
-      .catch(() => setSettings(null));
+      .then((data) => {
+        if (!ignore) setSettings(data);
+      })
+      .catch(() => {
+        if (!ignore) setSettings(null);
+      });
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   useEffect(() => {
+    let ignore = false;
     fetch("/api/loadout/equipped")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setWeapon(data))
-      .catch(() => setWeapon(null));
+      .then((data) => {
+        if (!ignore) setWeapon(data);
+      })
+      .catch(() => {
+        if (!ignore) setWeapon(null);
+      });
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (!canvasRef.current || !inventory || !settings) return;
+    if (!canvasRef.current || !inventory || !settings || gameRef.current)
+      return;
     const game = new ArenaGame(
       canvasRef.current,
       setState,
@@ -68,7 +93,10 @@ export default function ArenaPage() {
       settings,
     );
     gameRef.current = game;
-    return () => game.dispose();
+    return () => {
+      game.dispose();
+      gameRef.current = null;
+    };
   }, [inventory, settings]);
 
   useEffect(() => {

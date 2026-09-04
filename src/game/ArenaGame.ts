@@ -115,7 +115,7 @@ const GRAVITY = -18;
 const JUMP_SPEED = 6.5;
 const GROUND_Y = PLAYER_HEIGHT;
 const BOT_SPEED = 2.2;
-const BOT_SCALE = 1.0;
+const BOT_SCALE = 0.65;
 
 export class ArenaGame {
   private renderer: THREE.WebGLRenderer;
@@ -175,6 +175,7 @@ export class ArenaGame {
   private state: ArenaState;
   private onState: StateListener;
   private hitFlashEl: HTMLDivElement | null = null;
+  private pointerLockCooldownUntil = 0;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -206,6 +207,15 @@ export class ArenaGame {
     };
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    console.log("canvas size at init:", canvas.clientWidth, canvas.clientHeight);
+    console.log("WebGL context:", this.renderer.getContext());
+    this.canvas.addEventListener("webglcontextlost", (e) => {
+      e.preventDefault();
+      console.error("🔴 WebGL context lost!", e);
+    });
+    this.canvas.addEventListener("webglcontextrestored", () => {
+      console.warn("🟢 WebGL context restored");
+    });
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
@@ -241,6 +251,11 @@ export class ArenaGame {
     document.addEventListener("mousemove", this.handleMouseMove);
     document.addEventListener("keydown", this.handleKeyDown);
     document.addEventListener("keyup", this.handleKeyUp);
+    document.addEventListener(
+      "pointerlockchange",
+      this.handlePointerLockChange,
+    );
+    document.addEventListener("pointerlockerror", this.handlePointerLockError);
 
     this.emitState();
 
@@ -248,19 +263,19 @@ export class ArenaGame {
   }
 
   private triggerLocalHitFlash() {
-  if (!this.hitFlashEl) {
-    const el = document.createElement("div");
-    el.style.cssText =
-      "position:fixed;inset:0;pointer-events:none;z-index:25;opacity:0;transition:opacity 60ms;" +
-      "background:radial-gradient(circle, transparent 40%, rgba(255,0,0,0.35) 100%);";
-    this.canvas.parentElement?.appendChild(el);
-    this.hitFlashEl = el;
+    if (!this.hitFlashEl) {
+      const el = document.createElement("div");
+      el.style.cssText =
+        "position:fixed;inset:0;pointer-events:none;z-index:25;opacity:0;transition:opacity 60ms;" +
+        "background:radial-gradient(circle, transparent 40%, rgba(255,0,0,0.35) 100%);";
+      this.canvas.parentElement?.appendChild(el);
+      this.hitFlashEl = el;
+    }
+    this.hitFlashEl.style.opacity = "1";
+    setTimeout(() => {
+      if (this.hitFlashEl) this.hitFlashEl.style.opacity = "0";
+    }, 100);
   }
-  this.hitFlashEl.style.opacity = "1";
-  setTimeout(() => {
-    if (this.hitFlashEl) this.hitFlashEl.style.opacity = "0";
-  }, 100);
-}
 
   // ---------- async asset loading ----------
 
@@ -429,7 +444,7 @@ export class ArenaGame {
   private buildStaticArena() {
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2, ARENA_HALF_SIZE * 2),
-      new THREE.MeshStandardMaterial({ color: 0x5c8a4a, roughness: 0.9 }) // grassy daytime ground, was 0x1a1f28
+      new THREE.MeshStandardMaterial({ color: 0x5c8a4a, roughness: 0.9 }), // grassy daytime ground, was 0x1a1f28
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
@@ -437,23 +452,23 @@ export class ArenaGame {
   }
 
   private setupLights() {
-  this.scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x4a6b3a, 1.1)); // sky/ground bounce, was 0.7
+    this.scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x4a6b3a, 1.1)); // sky/ground bounce, was 0.7
 
-  const sun = new THREE.DirectionalLight(0xfff6e0, 1.9);   // was 1.15
-  sun.position.set(20, 30, 12);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -ARENA_HALF_SIZE - 5;
-  sun.shadow.camera.right = ARENA_HALF_SIZE + 5;
-  sun.shadow.camera.top = ARENA_HALF_SIZE + 5;
-  sun.shadow.camera.bottom = -ARENA_HALF_SIZE - 5;
-  sun.shadow.camera.far = 80;
-  sun.shadow.bias = -0.0015;
-  this.scene.add(sun);
+    const sun = new THREE.DirectionalLight(0xfff6e0, 1.9); // was 1.15
+    sun.position.set(20, 30, 12);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -ARENA_HALF_SIZE - 5;
+    sun.shadow.camera.right = ARENA_HALF_SIZE + 5;
+    sun.shadow.camera.top = ARENA_HALF_SIZE + 5;
+    sun.shadow.camera.bottom = -ARENA_HALF_SIZE - 5;
+    sun.shadow.camera.far = 80;
+    sun.shadow.bias = -0.0015;
+    this.scene.add(sun);
 
-  const fill = new THREE.AmbientLight(0xffffff, 0.35);     // soft daylight fill, replaces the cyan point light
-  this.scene.add(fill);
-}
+    const fill = new THREE.AmbientLight(0xffffff, 0.35); // soft daylight fill, replaces the cyan point light
+    this.scene.add(fill);
+  }
 
   private spawnBot(base: LoadedCharacter, weaponBase: THREE.Group) {
     this.botCharacterCache = base;
@@ -473,7 +488,7 @@ export class ArenaGame {
     instance.model.userData.muzzleFlash = flash;
 
     this.scene.add(instance.model);
-    gameAssets.playAction(instance, "Idle_Gun", 0.1);
+    gameAssets.playAction(instance, "holding-right", 0.1);
 
     this.bot = instance;
     this.botHealth = BOT_HEALTH_MAX;
@@ -530,10 +545,28 @@ export class ArenaGame {
 
   private handleMouseDown = () => {
     if (document.pointerLockElement !== this.canvas) {
-      this.canvas.requestPointerLock();
+      if (performance.now() < this.pointerLockCooldownUntil) return;
+      const result = this.canvas.requestPointerLock() as unknown;
+      if (result instanceof Promise) {
+        result.catch(() => {
+          // browser refused (e.g. cooldown after exiting lock) — back off briefly
+          this.pointerLockCooldownUntil = performance.now() + 1200;
+        });
+      }
       return;
     }
     this.shoot();
+  };
+
+  private handlePointerLockChange = () => {
+    if (document.pointerLockElement !== this.canvas) {
+      // lock was just released — browsers block immediate re-acquisition
+      this.pointerLockCooldownUntil = performance.now() + 1200;
+    }
+  };
+
+  private handlePointerLockError = () => {
+    this.pointerLockCooldownUntil = performance.now() + 1200;
   };
 
   private handleResize = () => {
@@ -553,7 +586,7 @@ export class ArenaGame {
       slot > 2
     )
       return;
-    
+
     soundManager.play2D("weapon_switch", 0.5);
     this.lastSlot = this.currentSlot;
     this.currentSlot = slot;
@@ -751,7 +784,7 @@ export class ArenaGame {
     if (this.botHealth <= 0) {
       this.botAlive = false;
       this.botDying = true;
-      gameAssets.playAction(this.bot, "Death", 0.15, true);
+      gameAssets.playAction(this.bot, "die", 0.15, true);
       soundManager.playAt("death", this.bot.model, 0.8);
       this.state.playerKills += 1;
       this.weaponKills[this.currentSlot] += 1;
@@ -763,11 +796,11 @@ export class ArenaGame {
       }
       setTimeout(() => this.respawnBot(), 2000);
     } else {
-      gameAssets.playAction(this.bot, "HitReact", 0.08, true);
+      gameAssets.playAction(this.bot, "emote-no", 0.08, true);
       soundManager.playAt("hit_taken", this.bot.model, 0.7);
       setTimeout(() => {
         if (this.botAlive && this.bot) {
-          gameAssets.playAction(this.bot, "Walk", 0.15);
+          gameAssets.playAction(this.bot, "walk", 0.15);
         }
       }, 350);
     }
@@ -920,14 +953,18 @@ export class ArenaGame {
     if (moving) {
       toTarget.normalize().multiplyScalar(BOT_SPEED * delta);
       model.position.add(toTarget);
-      gameAssets.playAction(this.bot, "Run_Gun", 0.2);
+      gameAssets.playAction(this.bot, "sprint", 0.2);
       soundManager.loopAt("bot-footsteps", "footstep_run", model, 0.7);
     } else {
-      gameAssets.playAction(this.bot, "Idle_Gun", 0.2);
+      gameAssets.playAction(this.bot, "holding-right", 0.2);
       soundManager.stopLoop("bot-footsteps");
     }
 
-    model.lookAt(this.camera.position.x, model.position.y, this.camera.position.z);
+    model.lookAt(
+      this.camera.position.x,
+      model.position.y,
+      this.camera.position.z,
+    );
 
     const now = performance.now();
     if (now - this.botLastShotTime > BOT_FIRE_INTERVAL_MS) {
@@ -973,14 +1010,17 @@ export class ArenaGame {
   // ---------- loop ----------
 
   async start() {
+    console.log("start() called");
     this.running = true;
     await this.ready;
+    console.log("assets ready, running =", this.running);
     if (!this.running) return; // disposed while assets were still loading
     this.loop();
   }
 
   private loop = () => {
     if (!this.running) return;
+    console.log("frame"); 
     this.animationId = requestAnimationFrame(this.loop);
     const delta = Math.min(this.clock.getDelta(), 0.1);
 
@@ -999,6 +1039,14 @@ export class ArenaGame {
     document.removeEventListener("mousemove", this.handleMouseMove);
     document.removeEventListener("keydown", this.handleKeyDown);
     document.removeEventListener("keyup", this.handleKeyUp);
+    document.removeEventListener(
+      "pointerlockchange",
+      this.handlePointerLockChange,
+    );
+    document.removeEventListener(
+      "pointerlockerror",
+      this.handlePointerLockError,
+    );
     this.hitFlashEl?.remove();
     soundManager.stopAllLoops();
     this.renderer.dispose();

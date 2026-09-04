@@ -412,11 +412,11 @@ export class MultiplayerArena {
           this.updateState({ opponentHealth: data.health });
           const remote = this.remotePlayers.get(data.targetId);
           if (remote && data.health > 0) {
-            gameAssets.playAction(remote.character, "HitReact", 0.08, true);
+            gameAssets.playAction(remote.character, "emote-no", 0.08, true);
             setTimeout(() => {
               if (remote.moving)
-                gameAssets.playAction(remote.character, "Run_Gun", 0.15);
-              else gameAssets.playAction(remote.character, "Idle_Gun", 0.15);
+                gameAssets.playAction(remote.character, "sprint", 0.15);
+              else gameAssets.playAction(remote.character, "holding-right", 0.15);
             }, 350);
           }
           this.triggerLocalHitFlash("landed"); // confirms YOUR shot connected
@@ -459,7 +459,7 @@ export class MultiplayerArena {
           if (remote) {
             remote.character.model.position.set(data.x, 0, data.z);
             remote.targetPos.set(data.x, 0, data.z);
-            gameAssets.playAction(remote.character, "Idle_Gun", 0.1);
+            gameAssets.playAction(remote.character, "holding-right", 0.1);
           }
         }
       },
@@ -584,14 +584,14 @@ export class MultiplayerArena {
 
       // detect damage taken -> hit reaction
       if (p.health < remote.lastHealth && p.health > 0) {
-        gameAssets.playAction(remote.character, "HitReact", 0.08, true);
+        gameAssets.playAction(remote.character, "emote-no", 0.08, true);
         soundManager.playAt("hit_taken", remote.character.model, 0.6, 8);
       }
       remote.lastHealth = p.health;
 
       // death
       if (!p.alive) {
-        gameAssets.playAction(remote.character, "Death", 0.15, true);
+        gameAssets.playAction(remote.character, "die", 0.15, true);
         soundManager.playAt("death", remote.character.model, 0.7, 10);          // <-- add
         soundManager.stopLoop(`remote-footsteps-${p.id}`);
       }
@@ -658,6 +658,7 @@ export class MultiplayerArena {
     if (this.remotePlayers.has(id)) return; // race guard
 
     const character = gameAssets.spawnCharacter(charBase);
+    character.model.scale.setScalar(0.65);
     const weaponModel = gameAssets.spawnProp(weaponBase);
     attachWeaponToCharacter(character, weaponModel, weaponKey);
 
@@ -671,7 +672,7 @@ export class MultiplayerArena {
     character.model.position.y -= box.min.y; // correct once, relative to the group
     character.model.rotation.y = Math.PI;
     this.scene.add(group);
-    gameAssets.playAction(character, "Idle_Gun", 0.1);
+    gameAssets.playAction(character, "holding-right", 0.1);
 
     this.remotePlayers.set(id, {
       character,
@@ -1004,7 +1005,7 @@ export class MultiplayerArena {
         remote.moving = moved;
         gameAssets.playAction(
           remote.character,
-          moved ? "Run_Gun" : "Idle_Gun",
+          moved ? "sprint" : "holding-right",
           0.2,
         );
         if (moved) {

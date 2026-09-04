@@ -81,14 +81,16 @@ class GameAssetsLoader {
 export const gameAssets = new GameAssetsLoader();
 
 export const ASSET_PATHS = {
-  zombie: "/models/Characters/glTF/Zombie_Basic.gltf",
-  characterMatt: "/models/Characters/glTF/Characters_Matt.gltf",
-  characterLis: "/models/Characters/glTF/Characters_Lis.gltf",
-  characterSam: "/models/Characters/glTF/Characters_Sam.gltf",
-  characterShaun: "/models/Characters/glTF/Characters_Shaun.gltf",
-  rifleWeapon: "/models/Weapons/glTF/Rifle.gltf",
-  pistolWeapon: "/models/Weapons/glTF/Pistol.gltf",
-  knifeWeapon: "/models/Weapons/glTF/Knife.gltf",
+  zombie: "/models/CharactersBlocky/character-d.glb",
+  characterMatt: "/models/CharactersBlocky/character-a.glb",
+  characterLis: "/models/CharactersBlocky/character-b.glb",
+  characterSam: "/models/CharactersBlocky/character-c.glb",
+  characterShaun: "/models/CharactersBlocky/character-d.glb",
+  rifleWeapon: "/models/WeaponsBlocky/blasterA.glb",
+  pistolWeapon: "/models/WeaponsBlocky/blasterF.glb",
+  // NOTE: Blaster Kit has no melee/knife model - this still points at the
+  // OLD knife mesh until you source a blocky knife. See chat notes.
+  knifeWeapon: "/models/WeaponsBlocky/blasterC.glb",
   containerRed: "/models/Environment/glTF/Container_Red.gltf",
   containerGreen: "/models/Environment/glTF/Container_Green.gltf",
   barrel: "/models/Environment/glTF/Barrel.gltf",
@@ -116,11 +118,23 @@ export const WEAPON_ASSET_BY_KEY: Record<string, string> = {
   knife: ASSET_PATHS.knifeWeapon,
 };
 
-// matches the empty socket node names baked into each character's skeleton
+// The Kenney Blocky Characters rig has no dedicated hand socket empties -
+// every weapon parents to the "arm-right" node instead, then gets nudged
+// into the hand with WEAPON_GRIP_OFFSET below.
 const WEAPON_SOCKET_NAME: Record<string, string> = {
-  rifle: "Rifle",
-  pistol: "Pistol",
-  knife: "Knife",
+  rifle: "arm-right",
+  pistol: "arm-right",
+  knife: "arm-right",
+};
+
+// Starting-point offsets to seat each weapon in the hand. arm-right's local
+// origin is at the shoulder and the arm mesh hangs from y=0.1 (shoulder) to
+// y=-1.0 (hand), so the hand is roughly (0, -0.95, 0.1) in the arm's local
+// space. These are a starting guess - tune per weapon by eye in-browser.
+const WEAPON_GRIP_OFFSET: Record<string, { position: [number, number, number]; rotation: [number, number, number] }> = {
+  rifle: { position: [0, -0.95, 0.15], rotation: [0, 0, 0] },
+  pistol: { position: [0, -0.95, 0.1], rotation: [0, 0, 0] },
+  knife: { position: [0, -0.95, 0.1], rotation: [0, 0, 0] },
 };
 
 export function pickCharacterPath(seed: string): string {
@@ -143,8 +157,9 @@ export function attachWeaponToCharacter(
   const parent = socket ?? character.model;
 
   parent.add(weaponModel);
-  weaponModel.position.set(0, 0, 0);
-  weaponModel.rotation.set(0, 0, 0);
+  const offset = WEAPON_GRIP_OFFSET[weaponKey] ?? { position: [0, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number] };
+  weaponModel.position.set(...offset.position);
+  weaponModel.rotation.set(...offset.rotation);
   character.model.userData.attachedWeapon = weaponModel;
 }
 
