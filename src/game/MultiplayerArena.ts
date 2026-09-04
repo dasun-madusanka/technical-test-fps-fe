@@ -62,6 +62,7 @@ const GRAVITY = -18;
 const JUMP_SPEED = 6.5;
 const RELOAD_TIME_MS = 1500;
 const MOVE_SEND_INTERVAL_MS = 50;
+const PLAYER_COLLISION_RADIUS = 0.4; // matches the server's PLAYER_RADIUS used for shot hit-testing
 
 const DEFAULT_INVENTORY: WeaponInventory = {
   primary: {
@@ -140,6 +141,7 @@ export class MultiplayerArena {
   private remotePlayers = new Map<string, RemotePlayer>();
   private obstacles: THREE.Object3D[] = [];
   private hitFlashEl: HTMLDivElement | null = null;
+  private colliders: { x: number; z: number; radius: number }[] = [];   // <-- add this
 
   private state: MultiplayerState = {
     connectionStatus: "connecting",
@@ -228,67 +230,97 @@ export class MultiplayerArena {
   }
 
   private async loadEnvironmentProps() {
-    const [
-      barrel,
-      cinderBlock,
-      pallet,
-      chest,
-      trafficBarrier,
-      trafficCone,
-      containerRed,
-      containerGreen,
-    ] = await Promise.all([
-      gameAssets.loadProp(ASSET_PATHS.barrel),
-      gameAssets.loadProp(ASSET_PATHS.cinderBlock),
-      gameAssets.loadProp(ASSET_PATHS.pallet),
-      gameAssets.loadProp(ASSET_PATHS.chest),
-      gameAssets.loadProp(ASSET_PATHS.trafficBarrier),
-      gameAssets.loadProp(ASSET_PATHS.trafficCone),
-      gameAssets.loadProp(ASSET_PATHS.containerRed),
-      gameAssets.loadProp(ASSET_PATHS.containerGreen),
-    ]);
+  const [
+    barrel,
+    cinderBlock,
+    pallet,
+    chest,
+    trafficBarrier,
+    trafficCone,
+    containerRed,
+    containerGreen,
+    trashBag,        // <-- add
+    streetLights,    // <-- add
+    waterTower,      // <-- add
+  ] = await Promise.all([
+    gameAssets.loadProp(ASSET_PATHS.barrel),
+    gameAssets.loadProp(ASSET_PATHS.cinderBlock),
+    gameAssets.loadProp(ASSET_PATHS.pallet),
+    gameAssets.loadProp(ASSET_PATHS.chest),
+    gameAssets.loadProp(ASSET_PATHS.trafficBarrier),
+    gameAssets.loadProp(ASSET_PATHS.trafficCone),
+    gameAssets.loadProp(ASSET_PATHS.containerRed),
+    gameAssets.loadProp(ASSET_PATHS.containerGreen),
+    gameAssets.loadProp(ASSET_PATHS.trashBag),        // <-- add
+    gameAssets.loadProp(ASSET_PATHS.streetLights),    // <-- add
+    gameAssets.loadProp(ASSET_PATHS.waterTower),      // <-- add
+  ]);
 
-    const coverSpots: [THREE.Group, number, number, number][] = [
-      [barrel, 4, 0, 4],
-      [cinderBlock, -5, 0, -3],
-      [pallet, 6, 0, -6],
-      [chest, -6, 0, 5],
-      [trafficBarrier, 0, 0, -8],
-      [barrel, -3, 0, 7],
-      [cinderBlock, 3, 0, -3],
-    ];
-    for (const [base, x, y, z] of coverSpots) {
-      const prop = gameAssets.spawnProp(base);
-      prop.position.set(x, y, z);
-      prop.rotation.y = Math.random() * Math.PI * 2;
-      this.scene.add(prop);
-      this.obstacles.push(prop);
-    }
+  // One canonical layout: every solid prop gets a collision radius; decorative
+  // ones (cones, trash bags) get none, so players can walk through them.
+  type PropSpot = { base: THREE.Group; x: number; z: number; radius: number | null; scale?: number };
 
-    const perimeterSpots: [number, number, number][] = [
-      [-14, 0, -14],
-      [14, 0, -14],
-      [-14, 0, 14],
-      [14, 0, 14],
-    ];
-    perimeterSpots.forEach(([x, y, z], i) => {
-      const base = i % 2 === 0 ? containerRed : containerGreen;
-      const container = gameAssets.spawnProp(base);
-      container.position.set(x, y, z);
-      container.rotation.y = Math.random() * Math.PI * 2;
-      this.scene.add(container);
-    });
+  const layout: PropSpot[] = [
+    // cover spots — match the server's obstacles.ts exactly, so shots and movement agree on where these block
+    { base: barrel, x: 4, z: 4, radius: 0.55 },
+    { base: cinderBlock, x: -5, z: -3, radius: 0.6 },
+    { base: pallet, x: 6, z: -6, radius: 0.9 },
+    { base: chest, x: -6, z: 5, radius: 0.65 },
+    { base: trafficBarrier, x: 0, z: -8, radius: 0.75 },
 
-    const clutterSpots: [THREE.Group, number, number][] = [
-      [trafficCone, 2, 6],
-      [trafficCone, -2, -6],
-    ];
-    for (const [base, x, z] of clutterSpots) {
-      const prop = gameAssets.spawnProp(base);
-      prop.position.set(x, 0, z);
-      this.scene.add(prop);
+    // extra cover (decorative-only on the server today — flag this if you also want shots blocked by these)
+    { base: barrel, x: -3, z: 7, radius: 0.55 },
+    { base: cinderBlock, x: 3, z: -3, radius: 0.6 },
+    { base: chest, x: 8, z: 2, radius: 0.65 },
+    { base: pallet, x: -8, z: -2, radius: 0.9 },
+    { base: trafficBarrier, x: -2, z: 9, radius: 0.75 },
+
+    // landmark — big, collidable, roughly centered off to one side
+    { base: waterTower, x: 9, z: 9, radius: 1.6, scale: 1.1 },
+
+    // street lights — thin poles dotted along the interior, small collision radius
+    { base: streetLights, x: 10, z: -10, radius: 0.35 },
+    { base: streetLights, x: -10, z: 10, radius: 0.35 },
+    { base: streetLights, x: 0, z: 10, radius: 0.35 },
+    { base: streetLights, x: 0, z: -12, radius: 0.35 },
+
+    // decorative clutter — no collider, purely visual
+    { base: trafficCone, x: 2, z: 6, radius: null },
+    { base: trafficCone, x: -2, z: -6, radius: null },
+    { base: trashBag, x: 4.8, z: 3.2, radius: null },
+    { base: trashBag, x: -5.6, z: -2.4, radius: null },
+    { base: trashBag, x: 6.6, z: -5.4, radius: null },
+  ];
+
+  for (const spot of layout) {
+    const prop = gameAssets.spawnProp(spot.base);
+    prop.position.set(spot.x, 0, spot.z);
+    prop.rotation.y = Math.random() * Math.PI * 2;
+    if (spot.scale) prop.scale.setScalar(spot.scale);
+    this.scene.add(prop);
+    this.obstacles.push(prop);
+    if (spot.radius !== null) {
+      this.colliders.push({ x: spot.x, z: spot.z, radius: spot.radius });
     }
   }
+
+  // perimeter containers — kept as-is, purely decorative corner dressing;
+  // the boundary walls added in buildArena() now do the actual enclosing.
+  const perimeterSpots: [number, number, number][] = [
+    [-14, 0, -14],
+    [14, 0, -14],
+    [-14, 0, 14],
+    [14, 0, 14],
+  ];
+  perimeterSpots.forEach(([x, y, z], i) => {
+    const base = i % 2 === 0 ? containerRed : containerGreen;
+    const container = gameAssets.spawnProp(base);
+    container.position.set(x, y, z);
+    container.rotation.y = Math.random() * Math.PI * 2;
+    this.scene.add(container);
+    this.colliders.push({ x, z, radius: 1.8 }); // <-- add: these are big, should block too
+  });
+}
 
   private async loadLocalWeapons() {
     const bases = await Promise.all(
@@ -677,17 +709,43 @@ export class MultiplayerArena {
   }
 
   private buildArena() {
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2, ARENA_HALF_SIZE * 2),
-      new THREE.MeshStandardMaterial({ color: 0x5c8a4a, roughness: 0.9 }),
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    this.scene.add(floor);
-    // NOTE: removed the neon GridHelper + flat box walls — the perimeter
-    // containers loaded in loadEnvironmentProps() now form the boundary,
-    // matching ArenaGame's look instead of a debug grid.
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(ARENA_HALF_SIZE * 2, ARENA_HALF_SIZE * 2),
+    new THREE.MeshStandardMaterial({ color: 0x5c8a4a, roughness: 0.9 }),
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  this.scene.add(floor);
+
+  // enclosing perimeter walls — visible now, matching the invisible movement
+  // clamp in updatePlayerMovement() so what you see is what blocks you
+  const WALL_HEIGHT = 4;
+  const WALL_THICKNESS = 1;
+  const wallMaterial = new THREE.MeshStandardMaterial({
+    color: 0x3b3f45,
+    roughness: 0.85,
+    metalness: 0.15,
+  });
+  const span = ARENA_HALF_SIZE * 2 + WALL_THICKNESS;
+
+  const northSouth = new THREE.BoxGeometry(span, WALL_HEIGHT, WALL_THICKNESS);
+  const eastWest = new THREE.BoxGeometry(WALL_THICKNESS, WALL_HEIGHT, span);
+
+  const north = new THREE.Mesh(northSouth, wallMaterial);
+  north.position.set(0, WALL_HEIGHT / 2, -ARENA_HALF_SIZE - WALL_THICKNESS / 2);
+  const south = new THREE.Mesh(northSouth, wallMaterial);
+  south.position.set(0, WALL_HEIGHT / 2, ARENA_HALF_SIZE + WALL_THICKNESS / 2);
+  const east = new THREE.Mesh(eastWest, wallMaterial);
+  east.position.set(ARENA_HALF_SIZE + WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
+  const west = new THREE.Mesh(eastWest, wallMaterial);
+  west.position.set(-ARENA_HALF_SIZE - WALL_THICKNESS / 2, WALL_HEIGHT / 2, 0);
+
+  for (const wall of [north, south, east, west]) {
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    this.scene.add(wall);
   }
+}
 
   private setupLights() {
     this.scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x4a6b3a, 1.1));
@@ -876,6 +934,8 @@ export class MultiplayerArena {
     if (this.velocity.lengthSq() > 0) {
       this.velocity.normalize().multiplyScalar(PLAYER_SPEED * delta);
       const next = this.camera.position.clone().add(this.velocity);
+
+      this.resolveObstacleCollisions(next);
       const bound = ARENA_HALF_SIZE - 0.6;
       next.x = Math.max(-bound, Math.min(bound, next.x));
       next.z = Math.max(-bound, Math.min(bound, next.z));
@@ -896,6 +956,21 @@ export class MultiplayerArena {
       this.isGrounded = true;
     }
   }
+
+  private resolveObstacleCollisions(pos: THREE.Vector3) {
+  for (const c of this.colliders) {
+    const dx = pos.x - c.x;
+    const dz = pos.z - c.z;
+    const distSq = dx * dx + dz * dz;
+    const minDist = c.radius + PLAYER_COLLISION_RADIUS;
+    if (distSq < minDist * minDist && distSq > 1e-6) {
+      const dist = Math.sqrt(distSq);
+      const push = minDist - dist;
+      pos.x += (dx / dist) * push;
+      pos.z += (dz / dist) * push;
+    }
+  }
+}
 
   private sendMovementIfDue() {
     const now = performance.now();
